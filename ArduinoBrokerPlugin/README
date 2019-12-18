@@ -1,0 +1,3 @@
+arduinoBroker is an X-Plane plugin that communicates with an Arduino that is
+running the xpBrainDuino program.
+
