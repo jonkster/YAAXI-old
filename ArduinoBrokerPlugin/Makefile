@@ -28,7 +28,7 @@ CXXOBJECTS64	:= $(patsubst %.cpp, $(BUILDDIR)/obj64/%.o, $(CXXSOURCES))
 ALL_DEPS64		:= $(sort $(CDEPS64) $(CXXDEPS64))
 ALL_OBJECTS64	:= $(sort $(COBJECTS64) $(CXXOBJECTS64))
 
-CFLAGS := $(DEFINES) $(INCLUDES) -fPIC -fvisibility=hidden -fpermissive
+CFLAGS := $(DEFINES) $(INCLUDES) -fPIC -fvisibility=hidden -fpermissive 
 
 
 # Phony directive tells make that these are "virtual" targets, even if a file named "clean" exists.
@@ -47,7 +47,7 @@ $(TARGET): $(BUILDDIR)/$(TARGET)/64/lin.xpl
 $(BUILDDIR)/$(TARGET)/64/lin.xpl: $(ALL_OBJECTS64)
 	@echo Linking $@
 	mkdir -p $(dir $@)
-	gcc -m64 -static-libgcc -shared -Wl,--version-script=exports.txt -o $@ $(ALL_OBJECTS64) $(LIBS)
+	gcc -m64 -static-libgcc -shared -Wl,--version-script=exports.txt -o $@ $(ALL_OBJECTS64) $(LIBS) 
 
 # Compiler rules
 
