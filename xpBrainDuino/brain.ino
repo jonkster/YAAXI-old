@@ -50,8 +50,10 @@ bool ledState = false;
 // switch inputs
 bool toggleState0;
 bool toggleState1;
-bool pushState0;
-bool pushState1;
+bool toggleVHF;
+bool push0Last;
+bool toggleNAV;
+bool push1Last;
 bool twistState0;
 bool twistState1;
 
@@ -60,19 +62,26 @@ bool twistState1;
 //	g = get: XP ------> Arduino (eg display airspeed on Arduino device - Get From XP)
 //	s = set: Arduino -> XP      (eg take switch setting on Arduino and set value in XP - Set In XP)
 char *confValues[] =  {
-		(char*)"R:sim/cockpit/switches/pitot_heat_on:i:s",
-		(char*)"R:sim/cockpit/electrical/nav_lights_on:i:g",
 		(char*)"R:sim/cockpit/engine/fuel_pump_on:vi:s",
 		(char*)"R:sim/cockpit/engine/fuel_tank_selector:i:s",
 		(char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s",
 		(char*)"R:sim/cockpit/autopilot/heading:f:s",
-		(char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s"
+		(char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s",
+		(char*)"R:sim/cockpit/radios/nav1_freq_hz:i:g",
+		(char*)"R:sim/cockpit/radios/nav1_stdby_freq_hz:i:g",
+		(char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:g"
 };
 // ----------------------------------------------------------------------------------------------------
 
 int fuelPumpState = 0;
 int gearUnsafeState = -1;
+int nav1AFreq = 11090;
+int nav1SFreq = 11090;
+bool gearLockedDown = false;
 
+#define UDP_QUEUE_SIZE 10
+char sendQueue[UDP_QUEUE_SIZE ][32];
+int sendIdx = 0;
 
 // buffers for receiving and sending data
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
@@ -123,8 +132,10 @@ void setup() {
 
 	toggleState0 = digitalRead(TOGGLE0);
 	toggleState1 = digitalRead(TOGGLE1);
-	pushState0 = digitalRead(PUSH0);
-	pushState1 = digitalRead(PUSH1);
+	push0Last = digitalRead(PUSH0);
+	toggleVHF = false;
+	push1Last = digitalRead(PUSH1);
+	toggleNAV = false;
 	twistState0 = digitalRead(TWIST0);
 	twistState1 = digitalRead(TWIST1);
 
@@ -179,31 +190,50 @@ void readToggles() {
 }
 
 void readPushes() {
-	if (pushState0 != digitalRead(PUSH0)) {
-		pushState0 = !pushState0;
-		Serial.print("push switch 0: ");
-		Serial.println(pushState0);
+	if (push0Last != digitalRead(PUSH0)) {
+		push0Last = ! push0Last;
+		if (! push0Last) {
+			Serial.println("push switch 0: ");
+			toggleVHF = true;
+		}
 	}
-	if (pushState1 != digitalRead(PUSH1)) {
-		pushState1 = !pushState1;
-		Serial.print("push switch 1: ");
-		Serial.println(pushState1);
+	if (push1Last != digitalRead(PUSH1)) {
+		push1Last = ! push1Last;
+		if (! push1Last) {
+			Serial.println("push switch 1: ");
+			toggleNAV = true;
+		}
 	}
 
 }
 
-void readTwists() {
-	/*if (twistState0 != digitalRead(TWIST0)) {
-		twistState0 = !twistState0;
-		Serial.print("twist switch 0: ");
-		Serial.println(twistState0);
+void dumpQueue(const int idx) {
+	if (sendIdx > 0) {
+		sendIdx--;
+		Udp.write(sendQueue[sendIdx]);
+	} else {
+		char buf[32];
+		snprintf(buf, 32, "OK:%i", idx);
+		Udp.write(buf);
 	}
-	if (twistState1 != digitalRead(TWIST1)) {
-		twistState1 = !twistState1;
-		Serial.print("twist switch 1: ");
-		Serial.println(twistState1);
-	}*/
+}
 
+void queueUdp(const char* msg) {
+	strncpy(sendQueue[sendIdx], msg, sizeof(sendQueue[sendIdx]) - 1);	
+	sendIdx++;
+	if (sendIdx > UDP_QUEUE_SIZE) {
+		sendIdx--;
+	}
+}
+
+void toggleXPNavFreqs(const int sfreq, const int afreq) {
+	nav1AFreq = afreq;
+	nav1SFreq = sfreq;
+	char buf[32];
+	snprintf(buf, 32, "S:%i:%i", 5, nav1AFreq);
+	queueUdp(buf);
+	snprintf(buf, 32, "S:%i:%i", 6, nav1SFreq);
+	queueUdp(buf);
 }
 
 void loop() {
@@ -249,8 +279,10 @@ void loop() {
 				Udp.write("Unknown Command:");
 				Udp.write(packetBuffer);
 			}
+
 			Udp.endPacket();
 		}
+
 	}
 
 
@@ -267,8 +299,6 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg0 = hdg;
-		Serial.print("Heading Bug 0: ");
-		Serial.println(hdg);
 		previousClk0 = currentClk; 
 	}
 
@@ -285,8 +315,6 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg1 = hdg;
-		Serial.print("Heading Bug 1: ");
-		Serial.println(hdg);
 		previousClk1 = currentClk; 
 	}
 
@@ -298,7 +326,6 @@ void loop() {
 
 	readToggles();	
 	readPushes();	
-	readTwists();
 
 }
 
@@ -345,8 +372,29 @@ void getPitotHeatSwitchPos(const int idx, const char* value) {
 	char buf[32];
 	snprintf(buf, 32, "S:%i:%i", idx, s);
 	Udp.write(buf);
-	//Serial.print("Set X-Plane Pitot Heat Switch to:");
-	//Serial.println(value);
+}
+
+void getXPNav1ActiveFreq(const int idx, const char* value) {
+	int f = atoi(value);
+	if (f != nav1AFreq) {
+		nav1AFreq = f;
+		Serial.print("act="); Serial.println(f);
+	}
+	if (toggleNAV) {
+		Serial.println("toggle Nav!");
+		toggleNAV = false;
+		toggleXPNavFreqs(nav1AFreq, nav1SFreq);
+	} 
+	dumpQueue(idx);
+}
+
+void getXPNav1StandbyFreq(const int idx, const char* value) {
+	int f = atoi(value);
+	if (f != nav1SFreq) {
+		nav1SFreq = f;
+		Serial.print("sby="); Serial.println(f);
+	}
+	dumpQueue(idx);
 }
 
 void setXPHeadingBug(const int idx, const char* value) {
@@ -354,40 +402,66 @@ void setXPHeadingBug(const int idx, const char* value) {
 	if (bug0Changed) {
 		snprintf(buf, 32, "S:%i:%i", idx, bugHdg0);
 		bug0Changed = false;
+		Udp.write(buf);
 	} else {
-		snprintf(buf, 32, "OK:%i", idx);
+		dumpQueue(idx);
 	}
-	Udp.write(buf);
 }
 
 void setXPOBS(const int idx, const char* value) {
 	char buf[32];
 	if (bug1Changed) {
 		snprintf(buf, 32, "S:%i:%i", idx, bugHdg1);
+		Udp.write(buf);
 		bug1Changed = false;
 	} else {
 		snprintf(buf, 32, "OK:%i", idx);
+		dumpQueue(idx);
 	}
-	Udp.write(buf);
+}
+
+void getXPGearLocked(const int idx, const char* value) {
+	// value looks like: [0.5,0.5,0.5....]
+	char delim[] = ", ";
+	char arraySt[64];
+	char *g[3];
+	strncpy(arraySt, value + 1, sizeof(arraySt) - 1);
+	char *ptr = strtok(arraySt, delim);
+	if (ptr != NULL) {
+		g[0] = ptr;
+		ptr = strtok(NULL, delim);
+		if (ptr != NULL) {
+			g[1] = ptr;
+			ptr = strtok(NULL, delim);
+			if (ptr != NULL) {
+				g[2] = ptr;
+				if ((strncmp(g[0], "1.0", 3) == 0) && (strncmp(g[1], "1.0", 3) == 0) && (strncmp(g[2], "1.0", 3) == 0)) {
+					gearLockedDown = true;
+					digitalWrite(LED0, HIGH);
+					dumpQueue(idx);
+					return;
+				} else {
+					// gear not fully extended
+				}
+			}
+		}
+	}
+	gearLockedDown = false;
+	digitalWrite(LED0, LOW);
+	dumpQueue(idx);
 }
 
 void getXPGearUnsafe(const int idx, const char* value) {
 	int v = atoi(value);
 	if (v != gearUnsafeState) {
 		if (v == 0) { 
-			digitalWrite(LED0, HIGH);
 			digitalWrite(LED1, LOW);
-			Serial.print("gear safe");
 		} else {
-			digitalWrite(LED0, LOW);
 			digitalWrite(LED1, HIGH);
-			Serial.print("gear unsafe");
 		}
 	}
 	gearUnsafeState = v;
-	char buf[32];
-	snprintf(buf, 32, "OK:%i", idx);
-	Udp.write(buf);
+	dumpQueue(idx);
 }
 
 void setNavLight(const int idx, const char* value) {
@@ -397,9 +471,7 @@ void setNavLight(const int idx, const char* value) {
 	} else {
 		digitalWrite(LED2, LOW);
 	}
-	char buf[32];
-	snprintf(buf, 32, "OK:%i", idx);
-	Udp.write(buf);
+	dumpQueue(idx);
 }
 
 void setXPFuelPump(const int idx, const char *value) {
@@ -412,16 +484,14 @@ void setXPFuelPump(const int idx, const char *value) {
 	}
 	if (fuelPumpState != newFuelPumpState) {
 		fuelPumpState = newFuelPumpState;
-		Serial.print("setting fp to: "); Serial.println(fuelPumpState);
 		snprintf(buf, 32, "S:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, fuelPumpState);
+		Udp.write(buf);
 	} else {
-		snprintf(buf, 32, "OK:%i", idx);
+		dumpQueue(idx);
 	}
-	Udp.write(buf);
 }
 
 void setXPFuelTank(const int idx, const char *value) {
-	char buf[32];
 	if ((twistState0 != digitalRead(TWIST0)) || (twistState1 != digitalRead(TWIST1))) {
 		twistState0 = digitalRead(TWIST0);
 		twistState1 = digitalRead(TWIST1);
@@ -431,36 +501,40 @@ void setXPFuelTank(const int idx, const char *value) {
 		} else if (twistState1 == 0) {
 			s = 3;
 		}
+		char buf[32];
 		snprintf(buf, 32, "S:%i:%i", idx, s);
+		Udp.write(buf);
 	} else {
-		snprintf(buf, 32, "OK:%i", idx);
+		dumpQueue(idx);
 	}
-	Udp.write(buf);
 }
 
 void handleXPData(const char* regIdx, const char* value) {
 	int idx = atoi(regIdx);
 	switch (idx) {
 		case 0:
-			getPitotHeatSwitchPos(idx, value);
-			break;
-		case 1:
-			setNavLight(idx, value);
-			break;
-		case 2:
 			setXPFuelPump(idx, value);
 			break;
-		case 3:
+		case 1:
 			setXPFuelTank(idx, value);
 			break;
-		case 4:
+		case 2:
 			getXPGearUnsafe(idx, value);
 			break;
-		case 5:
+		case 3:
 			setXPHeadingBug(idx, value);
 			break;
-		case 6:
+		case 4:
 			setXPOBS(idx, value);
+			break;
+		case 5:
+			getXPNav1ActiveFreq(idx, value);
+			break;
+		case 6:
+			getXPNav1StandbyFreq(idx, value);
+			break;
+		case 7:
+			getXPGearLocked(idx, value);
 			break;
 		default:
 			Serial.print("no handler for #"); Serial.println(regIdx);

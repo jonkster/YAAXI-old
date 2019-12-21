@@ -200,7 +200,7 @@ void addDataRef(char getOrSet, char* propType, char* propPath) {
 		strncpy(activeDataPaths[activeDataIdx], propPath, sizeof(activeDataPaths[activeDataIdx]) - 1);
 		addLogMessage(propPath, " - registering...");
 		if (activeDataRefs[activeDataIdx] == NULL) {
-			addLogMessage(" - cannot register the property:", propPath);
+			addLogMessage(" - !! CANNOT register the property:", propPath);
 		} else {
 			addLogMessage(" - registered:", propPath);
 			activeDataIdx++;
@@ -214,7 +214,6 @@ void registerProperty(char *request) {
 	activeDataIdx = 0;
 	char  buff[1024];
 	strncpy(buff, request, sizeof(buff) - 1);
-	addLogMessage("parse request", "");
 	char delim[] = ":\n\r\t";
 
 	XPLMDataRef prop;
@@ -224,10 +223,8 @@ void registerProperty(char *request) {
 	bool found = false;
 	char *ptr = strtok(buff, delim);
 	while (ptr != NULL) {
-		addLogMessage("is it R", "?");
 		// discard "R"
 		if (strncmp(ptr, "R", 1) == 0) {
-			addLogMessagei("parsing entry #", activeDataIdx);
 			ptr = strtok(NULL, delim);
 			if (ptr != NULL) {
 				strncpy(propPath, ptr, sizeof(propPath) - 1);
@@ -257,7 +254,6 @@ void registerProperty(char *request) {
 
 void translateIntArrayString(int* iVector, const char *val) {
 	// have string like: [2,0,0,0,0,0,0]
-	addLogMessage("set vi =",  val);
 	char buff[32];
 	strncpy(buff, val, sizeof(buff) - 1);
 	char delim[] = ",";
