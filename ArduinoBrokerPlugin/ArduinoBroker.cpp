@@ -45,7 +45,7 @@
 #define ARD_CMD_LOG +9999997
 #define ARD_CMD_PAUSE 0
 
-#define REFRESH_RATE_SECS  0.08
+#define REFRESH_RATE_SECS  0.02
 
 char ardLog[50][128] = {
 	"",
@@ -222,9 +222,7 @@ void registerProperty(char *request) {
 	char propType[4] = "";
 	char getOrSet[8] = "";
 	bool found = false;
-	addLogMessage("start parsing", "");
 	char *ptr = strtok(buff, delim);
-	addLogMessage("got bit", "");
 	while (ptr != NULL) {
 		addLogMessage("is it R", "?");
 		// discard "R"
@@ -251,25 +249,87 @@ void registerProperty(char *request) {
 				addLogMessage("invalid register string, no path??", "");
 			}
 		} else {
-			addLogMessage("invalid register string, no 'R' prefix??", "");
+			addLogMessage("invalid register string, no 'R' prefix??", ptr);
 		}
 		ptr = strtok(NULL, delim);
+	}
+}
+
+void translateIntArrayString(int* iVector, const char *val) {
+	// have string like: [2,0,0,0,0,0,0]
+	addLogMessage("set vi =",  val);
+	char buff[32];
+	strncpy(buff, val, sizeof(buff) - 1);
+	char delim[] = ",";
+	char *ptr = strtok(buff+1, delim);
+	int idx = 0;
+	while (ptr != NULL) {
+		iVector[idx++] = atoi(ptr);
+		ptr = strtok(NULL, delim);
+	}
+}
+
+void setXPData(const char *msg) {
+	char  buff[32];
+	strncpy(buff, msg, sizeof(buff) - 1);
+	char delim[] = ":";
+	char idxSt[4];
+	char val[32];
+	char *ptr = strtok(buff, delim);
+	if (ptr != NULL) {
+		ptr = strtok(NULL, delim);
+		if (ptr != NULL) {
+			strncpy(idxSt, ptr, sizeof(idxSt) - 1);
+			ptr = strtok(NULL, delim);
+			if (ptr != NULL) {
+				strncpy(val, ptr, sizeof(val) - 1);
+				int idx = atoi(idxSt);
+				if (idx < activeDataIdx) {
+					char* propType = activeDataTypes[idx];
+					if (strncmp(propType, "i", 2) == 0) {
+						int vali = atoi(val);
+						XPLMDataRef dRef = activeDataRefs[idx];
+						XPLMSetDatai(dRef, vali);
+					} else if (strncmp(propType, "f", 2) == 0) {
+						float valf = atof(val);
+						XPLMDataRef dRef = activeDataRefs[idx];
+						XPLMSetDataf(dRef, valf);
+					} else if (strncmp(propType, "vi", 3) == 0) {
+						int iVector[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+						translateIntArrayString(iVector, val);
+						XPLMDataRef dRef = activeDataRefs[idx];
+						XPLMSetDatavi(dRef, iVector, 0, 8);
+					} else {
+						addLogMessage("Cannot set type yet!",  propType);
+					}
+				} else {
+					addLogMessagei("idx err?",  idx);
+				}
+			} else {
+				addLogMessage("no val?",  "");
+			}
+		} else {
+			addLogMessage("no S?",  "");
+		}
 	}
 }
 
 void actOnMessage(char* msg) {
 	if (strlen(msg) == 0) {
 		return;
-	}
-	if (strncmp(msg, "R:", 2) == 0) {
+	} else if (strncmp(msg, "R:", 2) == 0) {
 		sendData = false;
 		addLogMessage("got register response", "");
 		registerProperty(msg);
 		sendData = true;
+	} else if (strncmp(msg, "S:", 2) == 0) {
+		setXPData(msg);
+	} else if (strncmp(msg, "OK:", 3) == 0) {
+		return; // just acknowledgement
 	} else if (strncmp(msg, "Yes Hello!", 10) == 0) {
 		addLogMessage("got ping response", "");
 	} else {
-		//addLogMessage("rx:",  msg);
+		addLogMessage("got unknown response: ",  msg);
 	}
 }
 
@@ -277,7 +337,7 @@ int initialiseSocket() {
 	udpOK = false;
 	char errMsg[256];
 	unsigned short port = htons(ARD_PORT);
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	int sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
 	if (sock < 0)
 	{
 		strncpy(errMsg, "Error: Socket?", sizeof(errMsg) - 1);
@@ -335,8 +395,10 @@ int sendArduino(char* msg) {
                 	MSG_WAITALL,
 		       	(struct sockaddr *) &cliaddr,
                 	&len);
-    	sendBuf[result] = '\0';
-	actOnMessage(sendBuf);
+	if (result > 0) {
+		sendBuf[result] = '\0';
+		actOnMessage(sendBuf);
+	}
 
 	return 0;
 }
