@@ -65,7 +65,8 @@ char *confValues[] =  {
 		(char*)"R:sim/cockpit/engine/fuel_pump_on:vi:s",
 		(char*)"R:sim/cockpit/engine/fuel_tank_selector:i:s",
 		(char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s",
-		(char*)"R:sim/cockpit/autopilot/heading:f:s"
+		(char*)"R:sim/cockpit/autopilot/heading:f:s",
+		(char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s"
 };
 // ----------------------------------------------------------------------------------------------------
 
@@ -85,7 +86,9 @@ void sendConf();
 void handleXPData(const char*, const char*);
 
 int bugHdg0 = 0;
+bool bug0Changed = false;
 int bugHdg1 = 0;
+bool bug1Changed = false;
 
 void setup() {
 	Ethernet.begin(mac,ip);
@@ -256,6 +259,7 @@ void loop() {
 	int currentDT = digitalRead(inputDT0);
 	int delta = readEncoder(currentClk, currentDT, previousClk0, millis() - lastRotEncTime0);
 	if (delta != 0) {
+		bug0Changed = true;
 		lastRotEncTime0 = millis();
 		rotCount0 += delta;
 		int hdg = rotCount0 % 360;
@@ -273,6 +277,7 @@ void loop() {
 	currentDT = digitalRead(inputDT1);
 	delta = readEncoder(currentClk, currentDT, previousClk1, millis() - lastRotEncTime1);
 	if (delta != 0) {
+		bug1Changed = true;
 		lastRotEncTime1 = millis();
 		rotCount1 += delta;
 		int hdg = rotCount1 % 360;
@@ -346,7 +351,23 @@ void getPitotHeatSwitchPos(const int idx, const char* value) {
 
 void setXPHeadingBug(const int idx, const char* value) {
 	char buf[32];
-	snprintf(buf, 32, "S:%i:%i", idx, bugHdg0);
+	if (bug0Changed) {
+		snprintf(buf, 32, "S:%i:%i", idx, bugHdg0);
+		bug0Changed = false;
+	} else {
+		snprintf(buf, 32, "OK:%i", idx);
+	}
+	Udp.write(buf);
+}
+
+void setXPOBS(const int idx, const char* value) {
+	char buf[32];
+	if (bug1Changed) {
+		snprintf(buf, 32, "S:%i:%i", idx, bugHdg1);
+		bug1Changed = false;
+	} else {
+		snprintf(buf, 32, "OK:%i", idx);
+	}
 	Udp.write(buf);
 }
 
@@ -437,6 +458,9 @@ void handleXPData(const char* regIdx, const char* value) {
 			break;
 		case 5:
 			setXPHeadingBug(idx, value);
+			break;
+		case 6:
+			setXPOBS(idx, value);
 			break;
 		default:
 			Serial.print("no handler for #"); Serial.println(regIdx);
