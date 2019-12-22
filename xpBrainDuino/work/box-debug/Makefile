@@ -3,7 +3,8 @@
 BOARD_TAG    = uno
 ARDUINO_PORT = /dev/ttyACM1
 include /usr/share/arduino/Arduino.mk
-
+MONITOR_CMD   = minicom -D /dev/ttyACM1 -b 115200
+MONITOR_PARAMS = "#"
 
 
 # --- leonardo (or pro micro w/leo bootloader)

@@ -1,103 +1,10 @@
 /*
  */
 
+#include "config.h"
+#include "brain.h"
 
-#include <SPI.h>
-#include <Ethernet.h>
-#include <EthernetUdp.h>
-#define UDP_TX_PACKET_MAX_SIZE 256 //increase UDP size
-
-// Rotary Encoder Inputs
-#define inputCLK0 A0
-#define inputDT0 A1
-#define inputCLK1 A2
-#define inputDT1 A3
-
-//Leds
-#define LED0    2	
-#define LED1    3	
-#define LED2    4	
-#define LED3    5	
-
-// Switches
-#define TOGGLE0    8	
-#define TOGGLE1    9	
-#define PUSH0    A4	
-#define PUSH1    A5	
-#define TWIST0    6	
-#define TWIST1    7	
-
-
-byte mac[] = {  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(192, 168, 0, 177);
-unsigned int localPort = 8888;
-bool verbose = false;
-
-
-// rot encoder variables
-int rotCount0 = 0; 
-int previousClk0; 
-int rotCount1 = 0; 
-int previousClk1; 
-int lastRotEncTime0;
-int lastRotEncTime1;
-
-
-// led outputs
-int lastTime = 0;
-bool ledState = false;
-
-// switch inputs
-bool toggleState0;
-bool toggleState1;
-bool toggleVHF;
-bool push0Last;
-bool toggleNAV;
-bool push1Last;
-bool twistState0;
-bool twistState1;
-
-
-// ----------------------------------------------------------------------------------------------------
-//	g = get: XP ------> Arduino (eg display airspeed on Arduino device - Get From XP)
-//	s = set: Arduino -> XP      (eg take switch setting on Arduino and set value in XP - Set In XP)
-char *confValues[] =  {
-		(char*)"R:sim/cockpit/engine/fuel_pump_on:vi:s",
-		(char*)"R:sim/cockpit/engine/fuel_tank_selector:i:s",
-		(char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s",
-		(char*)"R:sim/cockpit/autopilot/heading:f:s",
-		(char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s",
-		(char*)"R:sim/cockpit/radios/nav1_freq_hz:i:g",
-		(char*)"R:sim/cockpit/radios/nav1_stdby_freq_hz:i:g",
-		(char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:g"
-};
-// ----------------------------------------------------------------------------------------------------
-
-int fuelPumpState = 0;
-int gearUnsafeState = -1;
-int nav1AFreq = 11090;
-int nav1SFreq = 11090;
-bool gearLockedDown = false;
-
-#define UDP_QUEUE_SIZE 10
-char sendQueue[UDP_QUEUE_SIZE ][32];
-int sendIdx = 0;
-
-// buffers for receiving and sending data
-char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
-
-EthernetUDP	Udp;
-int		clock;
-
-void replyPing();
-void parseData(char*); 
-void sendConf();
-void handleXPData(const char*, const char*);
-
-int bugHdg0 = 0;
-bool bug0Changed = false;
-int bugHdg1 = 0;
-bool bug1Changed = false;
+void registerXP();
 
 void setup() {
 	Ethernet.begin(mac,ip);
@@ -141,7 +48,10 @@ void setup() {
 
 
 	lastTime = millis() / 1000;
+
+	registerXP();
 }
+
 
 int readEncoder(const int currentClk, const int currentDT, const int previousClk, const int revTime) {
 	int delta = 0;
@@ -169,8 +79,8 @@ int readEncoder(const int currentClk, const int currentDT, const int previousClk
 
 void setLeds() {
 	//digitalWrite(LED1, ledState);
-	digitalWrite(LED2, !ledState);
-	digitalWrite(LED3, !ledState);
+	//digitalWrite(LED2, !ledState);
+	//digitalWrite(LED3, !ledState);
 	//digitalWrite(led4, ledState);
 	//digitalWrite(led5, ledState);
 	ledState = !ledState;
@@ -274,7 +184,7 @@ void loop() {
 			} else if (strncmp(packetBuffer, "G:", 2) == 0) {
 				parseData(packetBuffer);
 			} else if (strncmp(packetBuffer, "Register", 8) == 0) {
-				sendConf();
+				confResponse(Udp);
 			} else {
 				Udp.write("Unknown Command:");
 				Udp.write(packetBuffer);
@@ -335,16 +245,6 @@ void replyPing() {
 	Udp.write(value);
 	Serial.print("replied: ");
 	Serial.println(value);
-}
-
-void sendConf() {
-	int count = sizeof (confValues) / sizeof (const char *);
-	for (int i = 0; i < count; i++) {
-		Udp.write(confValues[i]);
-		Udp.write("\n");
-		Serial.print("sent value: ");
-		Serial.println(confValues[i]);
-	}
 }
 
 void parseData(char* msg) {
@@ -464,26 +364,43 @@ void getXPGearUnsafe(const int idx, const char* value) {
 	dumpQueue(idx);
 }
 
+
+void handleXPData(const char* regIdx, const char* value) {
+	const int idx = atoi(regIdx);
+	drConfig entry = getHandler(idx);
+	//Serial.print(regIdx); Serial.print(" v:"); Serial.println(value);
+	entry.handler(idx, value);
+	//dumpQueue(idx);
+}
+
+
+// ------------------ Configuration/Handlers --------------------------------
+int navLightState = 0;
 void setNavLight(const int idx, const char* value) {
 	int v = atoi(value);
-	if (v == 1) { 
-		digitalWrite(LED2, HIGH);
-	} else {
-		digitalWrite(LED2, LOW);
+	if (v != navLightState) {
+		Serial.println("change detected");
+		if (v == 1) { 
+			digitalWrite(LED2, HIGH);
+		} else {
+			digitalWrite(LED2, LOW);
+		}
+		navLightState = v;
 	}
 	dumpQueue(idx);
 }
 
 void setXPFuelPump(const int idx, const char *value) {
-	char buf[32];
 	int newFuelPumpState = 0;
 	if (toggleState0) {
 		newFuelPumpState = 2;
 	} else if (toggleState1) {
 		newFuelPumpState = 1;
 	}
+
 	if (fuelPumpState != newFuelPumpState) {
 		fuelPumpState = newFuelPumpState;
+		char buf[32];
 		snprintf(buf, 32, "S:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, fuelPumpState);
 		Udp.write(buf);
 	} else {
@@ -509,35 +426,15 @@ void setXPFuelTank(const int idx, const char *value) {
 	}
 }
 
-void handleXPData(const char* regIdx, const char* value) {
-	int idx = atoi(regIdx);
-	switch (idx) {
-		case 0:
-			setXPFuelPump(idx, value);
-			break;
-		case 1:
-			setXPFuelTank(idx, value);
-			break;
-		case 2:
-			getXPGearUnsafe(idx, value);
-			break;
-		case 3:
-			setXPHeadingBug(idx, value);
-			break;
-		case 4:
-			setXPOBS(idx, value);
-			break;
-		case 5:
-			getXPNav1ActiveFreq(idx, value);
-			break;
-		case 6:
-			getXPNav1StandbyFreq(idx, value);
-			break;
-		case 7:
-			getXPGearLocked(idx, value);
-			break;
-		default:
-			Serial.print("no handler for #"); Serial.println(regIdx);
-			break;
-	}
+void registerXP() {
+			
+	newEntry((char*)"R:sim/cockpit/electrical/nav_lights_on:i:s", &setNavLight);
+	newEntry((char*)"R:sim/cockpit/engine/fuel_pump_on:vi:s", &setXPFuelPump);
+	newEntry((char*)"R:sim/cockpit/engine/fuel_tank_selector:i:s", &setXPFuelTank);
+	/*newEntry((char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s", &getXPGearUnsafe);
+	newEntry((char*)"R:sim/cockpit/autopilot/heading:f:s", &setXPHeadingBug);
+	newEntry((char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s", &setXPOBS);
+	newEntry((char*)"R:sim/cockpit/radios/nav1_freq_hz:i:g", &getXPNav1ActiveFreq);
+	newEntry((char*)"R:sim/cockpit/radios/nav1_stdby_freq_hz:i:g", &getXPNav1StandbyFreq);
+	newEntry((char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:g", &getXPGearLocked);*/
 }

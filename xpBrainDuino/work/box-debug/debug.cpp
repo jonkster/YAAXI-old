@@ -1,5 +1,7 @@
 #include <SPI.h>
 
+#include "config.h"
+
 // Rotary Encoder Inputs
 #define inputCLK0 A0
 #define inputDT0 A1
@@ -13,12 +15,13 @@
 #define LED3    5	
 
 // Switches
-#define TOGGlE0    8	
+#define TOGGLE0    8	
 #define TOGGLE1    9	
 #define PUSH0    A4	
 #define PUSH1    A5	
 #define TWIST0    6	
 #define TWIST1    7	
+
 
 int rotCount0 = 0; 
 int previousClk0; 
@@ -78,6 +81,9 @@ void setup() {
 
 
 	lastTime = millis() / 1000;
+
+	testIt();
+
 } 
 
 int readEncoder(const int currentClk, const int currentDT, const int previousClk, const int revTime) {
@@ -139,6 +145,7 @@ void readPushes() {
 		pushState1 = !pushState1;
 		Serial.print("push switch 1: ");
 		Serial.println(pushState1);
+		displayHandlers();
 	}
 
 }
