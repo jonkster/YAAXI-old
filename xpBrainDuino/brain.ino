@@ -1,8 +1,9 @@
 /*
  */
-
+#include <Arduino.h>
 #include "config.h"
 #include "brain.h"
+#include "hardware.h"
 
 void registerXP();
 
@@ -11,111 +12,13 @@ void setup() {
 	Udp.begin(localPort);
 	Serial.begin(115200);
 
-	// Set encoder pins
-	pinMode (inputCLK0, INPUT);
-	pinMode (inputDT0,  INPUT);
-	pinMode (inputCLK1, INPUT);
-	pinMode (inputDT1,  INPUT);
-
-	// pins for switches
-	pinMode (TOGGLE0, INPUT);
-	pinMode (TOGGLE1, INPUT);
-	pinMode (PUSH0, INPUT);
-	pinMode (PUSH1, INPUT);
-	pinMode (TWIST0, INPUT);
-	pinMode (TWIST1, INPUT);
-
-	// pins for LEDS
-	pinMode (LED0, OUTPUT);
-	pinMode (LED1, OUTPUT);
-	pinMode (LED2, OUTPUT);
-	pinMode (LED3, OUTPUT);
-
-	// Read the initial state of Inputs
-	previousClk0 = digitalRead(inputCLK0);
-	previousClk1 = digitalRead(inputCLK1);
-	lastRotEncTime0 = millis();
-	lastRotEncTime1 = millis();
-
-	toggleState0 = digitalRead(TOGGLE0);
-	toggleState1 = digitalRead(TOGGLE1);
-	push0Last = digitalRead(PUSH0);
-	toggleVHF = false;
-	push1Last = digitalRead(PUSH1);
-	toggleNAV = false;
-	twistState0 = digitalRead(TWIST0);
-	twistState1 = digitalRead(TWIST1);
-
-
+	initPins();
 	lastTime = millis() / 1000;
-
 	registerXP();
+	showLights();
 }
 
 
-int readEncoder(const int currentClk, const int currentDT, const int previousClk, const int revTime) {
-	int delta = 0;
-	// If the previous and the current state of the inputCLK are different then a pulse has occured
-	if (currentClk != previousClk){ 
-		if (revTime < 2) {
-			delta = 8;
-		} else if (revTime < 20) {
-			delta = 6;
-		} else if (revTime < 50) {
-			delta = 4;
-		} else if (revTime < 100) {
-			delta = 2;
-		} else {
-			delta = 1;
-		}
-		// work out if clockwise or counter clockwise
-		if (currentDT != currentClk) { 
-		} else {
-			delta = - delta;
-		}
-	} 
-	return delta;
-}
-
-void setLeds() {
-	//digitalWrite(LED1, ledState);
-	//digitalWrite(LED2, !ledState);
-	//digitalWrite(LED3, !ledState);
-	//digitalWrite(led4, ledState);
-	//digitalWrite(led5, ledState);
-	ledState = !ledState;
-}
-
-void readToggles() {
-	if (toggleState0 != digitalRead(TOGGLE0)) {
-		toggleState0 = !toggleState0;
-		Serial.print("toggle switch 0: ");
-		Serial.println(toggleState0);
-	}
-	if (toggleState1 != digitalRead(TOGGLE1)) {
-		toggleState1 = !toggleState1;
-		Serial.print("toggle switch 1: ");
-		Serial.println(toggleState1);
-	}
-}
-
-void readPushes() {
-	if (push0Last != digitalRead(PUSH0)) {
-		push0Last = ! push0Last;
-		if (! push0Last) {
-			Serial.println("push switch 0: ");
-			toggleVHF = true;
-		}
-	}
-	if (push1Last != digitalRead(PUSH1)) {
-		push1Last = ! push1Last;
-		if (! push1Last) {
-			Serial.println("push switch 1: ");
-			toggleNAV = true;
-		}
-	}
-
-}
 
 void dumpQueue(const int idx) {
 	if (sendIdx > 0) {
@@ -123,7 +26,8 @@ void dumpQueue(const int idx) {
 		Udp.write(sendQueue[sendIdx]);
 	} else {
 		char buf[32];
-		snprintf(buf, 32, "OK:%i", idx);
+		memset(buf, 0, sizeof(buf));
+		snprintf(buf, sizeof(buf)-1, "O");
 		Udp.write(buf);
 	}
 }
@@ -132,25 +36,23 @@ void queueUdp(const char* msg) {
 	strncpy(sendQueue[sendIdx], msg, sizeof(sendQueue[sendIdx]) - 1);	
 	sendIdx++;
 	if (sendIdx > UDP_QUEUE_SIZE) {
+		Serial.println("udp queue limit!");
 		sendIdx--;
 	}
 }
 
-void toggleXPNavFreqs(const int sfreq, const int afreq) {
-	nav1AFreq = afreq;
-	nav1SFreq = sfreq;
-	char buf[32];
-	snprintf(buf, 32, "S:%i:%i", 5, nav1AFreq);
-	queueUdp(buf);
-	snprintf(buf, 32, "S:%i:%i", 6, nav1SFreq);
-	queueUdp(buf);
-}
 
+int bugHdg0 = 0;
+bool bug0Changed = false;
+int bugHdg1 = 0;
+bool bug1Changed = false;
 void loop() {
 	// if there's data available, read a packet
 	int packetSize = Udp.parsePacket();
 	if(packetSize)
 	{
+		char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
+		memset(packetBuffer,0,sizeof(packetBuffer));
 		if (verbose) {
 			Serial.print("Received packet of size ");
 			Serial.println(packetSize);
@@ -186,10 +88,11 @@ void loop() {
 			} else if (strncmp(packetBuffer, "Register", 8) == 0) {
 				confResponse(Udp);
 			} else {
-				Udp.write("Unknown Command:");
-				Udp.write(packetBuffer);
+				char buf[32];
+				memset(buf, 0, sizeof(buf));
+				snprintf(buf, sizeof(buf)-1, "Unknown command: %s", packetBuffer);
+				Udp.write(buf);
 			}
-
 			Udp.endPacket();
 		}
 
@@ -199,7 +102,9 @@ void loop() {
 	// read encoder 0
 	int currentClk = digitalRead(inputCLK0);
 	int currentDT = digitalRead(inputDT0);
-	int delta = readEncoder(currentClk, currentDT, previousClk0, millis() - lastRotEncTime0);
+	int delta = 0;
+	delta = readEncoder(currentClk, currentDT, previousClk0, millis() - lastRotEncTime0);
+	previousClk0 = currentClk; 
 	if (delta != 0) {
 		bug0Changed = true;
 		lastRotEncTime0 = millis();
@@ -209,13 +114,13 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg0 = hdg;
-		previousClk0 = currentClk; 
 	}
 
 	// read encoder 1
 	currentClk = digitalRead(inputCLK1);
 	currentDT = digitalRead(inputDT1);
 	delta = readEncoder(currentClk, currentDT, previousClk1, millis() - lastRotEncTime1);
+	previousClk1 = currentClk; 
 	if (delta != 0) {
 		bug1Changed = true;
 		lastRotEncTime1 = millis();
@@ -225,13 +130,6 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg1 = hdg;
-		previousClk1 = currentClk; 
-	}
-
-	int now = millis() / 1000;
-	if (now - lastTime > 1) {
-		setLeds();
-		lastTime = now;
 	}
 
 	readToggles();	
@@ -241,17 +139,25 @@ void loop() {
 
 
 void replyPing() {
-	char value[] = "Yes Hello!";
+	char value[] = "Yes Hello!\n";
 	Udp.write(value);
-	Serial.print("replied: ");
-	Serial.println(value);
+	if (verbose) {
+		Serial.print("replied: ");
+		Serial.println(value);
+	}
+	showLights();
 }
 
-void parseData(char* msg) {
+void parseData(const char* msg) {
 	char delim[] = ":";
-	char *ptr = strtok(msg, delim);
+	char buf[32];
+	memset(buf, 0, sizeof(buf));
+	strncpy(buf, msg, sizeof(buf) - 1);
+	char *ptr = strtok(buf, delim);
 	char regIdx[4];
-	char value[64];
+	memset(regIdx, 0, sizeof(regIdx));
+	char value[32];
+	memset(value, 0, sizeof(value));
 	if (ptr != NULL) {
 		if ((strncmp(ptr, "S", 1) == 0) || (strncmp(ptr, "G", 1) == 0)) {
 			ptr = strtok(NULL, delim);
@@ -261,65 +167,96 @@ void parseData(char* msg) {
 				if (ptr != NULL) {
 					strncpy(value, ptr, sizeof(value) - 1);
 					handleXPData(regIdx, value);					
+					return;
 				}
 			}
 		}
 	}
+	Udp.write("parse failed");
+	return;
 }
 
-void getPitotHeatSwitchPos(const int idx, const char* value) {
-	int s = digitalRead(TOGGLE0);
-	char buf[32];
-	snprintf(buf, 32, "S:%i:%i", idx, s);
-	Udp.write(buf);
-}
 
-void getXPNav1ActiveFreq(const int idx, const char* value) {
-	int f = atoi(value);
-	if (f != nav1AFreq) {
-		nav1AFreq = f;
-		Serial.print("act="); Serial.println(f);
+void handleXPData(const char* regIdx, const char* value) {
+	const int idx = atoi(regIdx);
+	if (verbose) {
+		Serial.print("handle request #: "); Serial.print(regIdx); Serial.print(" v:"); Serial.println(value);
 	}
-	if (toggleNAV) {
-		Serial.println("toggle Nav!");
-		toggleNAV = false;
-		toggleXPNavFreqs(nav1AFreq, nav1SFreq);
-	} 
-	dumpQueue(idx);
-}
-
-void getXPNav1StandbyFreq(const int idx, const char* value) {
-	int f = atoi(value);
-	if (f != nav1SFreq) {
-		nav1SFreq = f;
-		Serial.print("sby="); Serial.println(f);
+	drConfig entry = getHandler(idx);
+	if (verbose) {
+		displayItem(entry);
+	}
+	if (entry.id >= 0) {
+		entry.handler(idx, value);
 	}
 	dumpQueue(idx);
 }
 
-void setXPHeadingBug(const int idx, const char* value) {
-	char buf[32];
-	if (bug0Changed) {
-		snprintf(buf, 32, "S:%i:%i", idx, bugHdg0);
-		bug0Changed = false;
-		Udp.write(buf);
-	} else {
-		dumpQueue(idx);
+
+// ------------------ Configuration/Handlers --------------------------------
+int navLightState = 0;
+void setNavLight(const int idx, const char* value) {
+	int v = atoi(value);
+	if (v != navLightState) {
+		Serial.println("change detected");
+		if (v == 1) { 
+			digitalWrite(LED2, HIGH);
+		} else {
+			digitalWrite(LED2, LOW);
+		}
+		navLightState = v;
 	}
 }
 
-void setXPOBS(const int idx, const char* value) {
-	char buf[32];
-	if (bug1Changed) {
-		snprintf(buf, 32, "S:%i:%i", idx, bugHdg1);
-		Udp.write(buf);
-		bug1Changed = false;
-	} else {
-		snprintf(buf, 32, "OK:%i", idx);
-		dumpQueue(idx);
+int fuelPumpState = 0;
+void setXPFuelPump(const int idx, const char *value) {
+	int newFuelPumpState = 0;
+	if (toggleState0) {
+		newFuelPumpState = 2;
+	} else if (toggleState1) {
+		newFuelPumpState = 1;
+	}
+
+	if (fuelPumpState != newFuelPumpState) {
+		fuelPumpState = newFuelPumpState;
+		char buf[32];
+		memset(buf, 0, sizeof(buf));
+		snprintf(buf, sizeof(buf)-1, "S:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, fuelPumpState);
+		queueUdp(buf);
 	}
 }
 
+void setXPFuelTank(const int idx, const char *value) {
+	if ((twistState0 != digitalRead(TWIST0)) || (twistState1 != digitalRead(TWIST1))) {
+		twistState0 = digitalRead(TWIST0);
+		twistState1 = digitalRead(TWIST1);
+		int s = 0;
+		if (twistState0 == 0) {
+			s = 1;
+		} else if (twistState1 == 0) {
+			s = 3;
+		}
+		char buf[32];
+		memset(buf, 0, sizeof(buf));
+		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, s);
+		queueUdp(buf);
+	}
+}
+
+int gearUnsafeState = -1;
+void getXPGearUnsafe(const int idx, const char* value) {
+	int v = atoi(value);
+	if (v != gearUnsafeState) {
+		if (v == 0) { 
+			digitalWrite(LED1, LOW);
+		} else {
+			digitalWrite(LED1, HIGH);
+		}
+	}
+	gearUnsafeState = v;
+}
+
+bool gearLockedDown = false;
 void getXPGearLocked(const int idx, const char* value) {
 	// value looks like: [0.5,0.5,0.5....]
 	char delim[] = ", ";
@@ -338,7 +275,6 @@ void getXPGearLocked(const int idx, const char* value) {
 				if ((strncmp(g[0], "1.0", 3) == 0) && (strncmp(g[1], "1.0", 3) == 0) && (strncmp(g[2], "1.0", 3) == 0)) {
 					gearLockedDown = true;
 					digitalWrite(LED0, HIGH);
-					dumpQueue(idx);
 					return;
 				} else {
 					// gear not fully extended
@@ -348,93 +284,74 @@ void getXPGearLocked(const int idx, const char* value) {
 	}
 	gearLockedDown = false;
 	digitalWrite(LED0, LOW);
-	dumpQueue(idx);
 }
 
-void getXPGearUnsafe(const int idx, const char* value) {
-	int v = atoi(value);
-	if (v != gearUnsafeState) {
-		if (v == 0) { 
-			digitalWrite(LED1, LOW);
-		} else {
-			digitalWrite(LED1, HIGH);
-		}
-	}
-	gearUnsafeState = v;
-	dumpQueue(idx);
-}
-
-
-void handleXPData(const char* regIdx, const char* value) {
-	const int idx = atoi(regIdx);
-	drConfig entry = getHandler(idx);
-	//Serial.print(regIdx); Serial.print(" v:"); Serial.println(value);
-	entry.handler(idx, value);
-	//dumpQueue(idx);
-}
-
-
-// ------------------ Configuration/Handlers --------------------------------
-int navLightState = 0;
-void setNavLight(const int idx, const char* value) {
-	int v = atoi(value);
-	if (v != navLightState) {
-		Serial.println("change detected");
-		if (v == 1) { 
-			digitalWrite(LED2, HIGH);
-		} else {
-			digitalWrite(LED2, LOW);
-		}
-		navLightState = v;
-	}
-	dumpQueue(idx);
-}
-
-void setXPFuelPump(const int idx, const char *value) {
-	int newFuelPumpState = 0;
-	if (toggleState0) {
-		newFuelPumpState = 2;
-	} else if (toggleState1) {
-		newFuelPumpState = 1;
-	}
-
-	if (fuelPumpState != newFuelPumpState) {
-		fuelPumpState = newFuelPumpState;
+void setXPHeadingBug(const int idx, const char* value) {
+	if (bug0Changed) {
 		char buf[32];
-		snprintf(buf, 32, "S:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, fuelPumpState);
-		Udp.write(buf);
-	} else {
-		dumpQueue(idx);
+		memset(buf, 0, sizeof(buf));
+		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, bugHdg0);
+		queueUdp(buf);
+		bug0Changed = false;
 	}
 }
 
-void setXPFuelTank(const int idx, const char *value) {
-	if ((twistState0 != digitalRead(TWIST0)) || (twistState1 != digitalRead(TWIST1))) {
-		twistState0 = digitalRead(TWIST0);
-		twistState1 = digitalRead(TWIST1);
-		int s = 0;
-		if (twistState0 == 0) {
-			s = 1;
-		} else if (twistState1 == 0) {
-			s = 3;
-		}
+void setXPOBS(const int idx, const char* value) {
+	if (bug1Changed) {
 		char buf[32];
-		snprintf(buf, 32, "S:%i:%i", idx, s);
-		Udp.write(buf);
-	} else {
-		dumpQueue(idx);
+		memset(buf, 0, sizeof(buf));
+		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, bugHdg1);
+		queueUdp(buf);
+		bug1Changed = false;
 	}
 }
+
+int nav1AFreq = 11090;
+int nav1SFreq = 11090;
+
+void toggleXPNavFreqs(const int sfreq, const int afreq) {
+	nav1AFreq = afreq;
+	nav1SFreq = sfreq;
+	char buf[32];
+	memset(buf, 0, sizeof(buf));
+	snprintf(buf, sizeof(buf)-1, "S:%i:%i", 5, nav1AFreq);
+	queueUdp(buf);
+	snprintf(buf, sizeof(buf)-1, "S:%i:%i", 6, nav1SFreq);
+	queueUdp(buf);
+}
+
+void getXPNav1ActiveFreq(const int idx, const char* value) {
+	int f = atoi(value);
+	if (f != nav1AFreq) {
+		nav1AFreq = f;
+		Serial.print("act=");
+		Serial.println(f);
+	}
+	/*if (toggleNAV) {
+		Serial.println("toggle Nav!");
+		toggleNAV = false;
+	//	toggleXPNavFreqs(nav1AFreq, nav1SFreq);
+	}*/
+}
+
+void getXPNav1StandbyFreq(const int idx, const char* value) {
+	int f = atoi(value);
+	if (f != nav1SFreq) {
+		nav1SFreq = f;
+		Serial.print("sby=");
+		Serial.println(f);
+	}
+}
+
 
 void registerXP() {
-			
 	newEntry((char*)"R:sim/cockpit/electrical/nav_lights_on:i:s", &setNavLight);
 	newEntry((char*)"R:sim/cockpit/engine/fuel_pump_on:vi:s", &setXPFuelPump);
 	newEntry((char*)"R:sim/cockpit/engine/fuel_tank_selector:i:s", &setXPFuelTank);
-	/*newEntry((char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s", &getXPGearUnsafe);
+	newEntry((char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:s", &getXPGearUnsafe);
+	newEntry((char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:g", &getXPGearLocked);
 	newEntry((char*)"R:sim/cockpit/autopilot/heading:f:s", &setXPHeadingBug);
 	newEntry((char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:s", &setXPOBS);
 	newEntry((char*)"R:sim/cockpit/radios/nav1_freq_hz:i:g", &getXPNav1ActiveFreq);
 	newEntry((char*)"R:sim/cockpit/radios/nav1_stdby_freq_hz:i:g", &getXPNav1StandbyFreq);
-	newEntry((char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:g", &getXPGearLocked);*/
 }

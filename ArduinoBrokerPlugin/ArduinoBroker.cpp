@@ -45,7 +45,7 @@
 #define ARD_CMD_LOG +9999997
 #define ARD_CMD_PAUSE 0
 
-#define REFRESH_RATE_SECS  0.02
+#define REFRESH_RATE_SECS  0.01
 
 char ardLog[50][128] = {
 	"",
@@ -78,7 +78,7 @@ int 		pingArduino();
 static void	menuHandlerCallback(void*, void*); 
 float		flightLoopCallback(float, float, int, void*);
 int		readArduinoConf();
-int 		sendArduino(char*);
+int 		sendArduino(char*, bool);
 void		createLogWidget(int, int, int, int);
 int		ardLogHandler(XPWidgetMessage, XPWidgetID, long, long);
 void		addLogMessage(const char*, const char*);
@@ -157,7 +157,7 @@ float	flightLoopCallback(
 		int   inCounter,
 		void *inRefcon)
 {
-	char msg[512] = "";
+	char msg[1024];
 	int vali;
 	int valvi[8];
 	float valf;
@@ -182,11 +182,12 @@ float	flightLoopCallback(
 			XPLMGetDatavf(dRef, valvf, 0, 8);
 			sprintf(msg, "%c:%i:[%f, %f, %f, %f, %f, %f, %f, %f]", getOrSet, sendIdx, valvf[0],valvf[1],valvf[2],valvf[3],valvf[4],valvf[5],valvf[6],valvf[7] );
 		} else {
-			sprintf(msg, "%c:%i:%s:cannot handle type: %s", getOrSet, sendIdx, activeDataPaths[sendIdx],  propType);
-			addLogMessage(msg, "");
+			snprintf(msg, sizeof(msg)-1, "%c:%i:%s:cannot handle type: %s", getOrSet, sendIdx, activeDataPaths[sendIdx],  propType);
+			addLogMessage(msg, " 1");
+			snprintf(msg, sizeof(msg)-1, "%i:%s:cannot handle type", sendIdx, activeDataPaths[sendIdx]);
 		}
 		// this slow...
-		sendArduino(msg);
+		sendArduino(msg, true);
 		sendIdx++;
 	}
 	return REFRESH_RATE_SECS; // seconds before next call
@@ -206,7 +207,7 @@ void addDataRef(char getOrSet, char* propType, char* propPath) {
 			activeDataIdx++;
 		}
 	} else {
-		addLogMessage("too many properties to register", "");
+		addLogMessage("too many properties to register", " 2");
 	}
 }
 
@@ -237,13 +238,13 @@ void registerProperty(char *request) {
 						found = true;
 						addDataRef(toupper(getOrSet[0]), propType, propPath);
 					} else {
-						addLogMessage("invalid register string, no get or set??", "");
+						addLogMessage("invalid register string, no get or set??", " 3");
 					}
 				} else {
-					addLogMessage("invalid register string, no type??", "");
+					addLogMessage("invalid register string, no type??", " 4");
 				}
 			} else {
-				addLogMessage("invalid register string, no path??", "");
+				addLogMessage("invalid register string, no path??", " 5");
 			}
 		} else {
 			addLogMessage("invalid register string, no 'R' prefix??", ptr);
@@ -281,6 +282,9 @@ void setXPData(const char *msg) {
 				strncpy(val, ptr, sizeof(val) - 1);
 				int idx = atoi(idxSt);
 				if (idx < activeDataIdx) {
+					if (idx == 5) {
+						addLogMessage("v:",  msg);
+					}
 					char* propType = activeDataTypes[idx];
 					if (strncmp(propType, "i", 2) == 0) {
 						int vali = atoi(val);
@@ -302,10 +306,10 @@ void setXPData(const char *msg) {
 					addLogMessagei("idx err?",  idx);
 				}
 			} else {
-				addLogMessage("no val?",  "");
+				addLogMessage("no val?",  " 6");
 			}
 		} else {
-			addLogMessage("no S?",  "");
+			addLogMessage("no S?",  " 7");
 		}
 	}
 }
@@ -315,15 +319,15 @@ void actOnMessage(char* msg) {
 		return;
 	} else if (strncmp(msg, "R:", 2) == 0) {
 		sendData = false;
-		addLogMessage("got register response", "");
+		addLogMessage("got register response", " 8");
 		registerProperty(msg);
 		sendData = true;
 	} else if (strncmp(msg, "S:", 2) == 0) {
 		setXPData(msg);
-	} else if (strncmp(msg, "OK:", 3) == 0) {
+	} else if (strncmp(msg, "O", 1) == 0) {
 		return; // just acknowledgement
 	} else if (strncmp(msg, "Yes Hello!", 10) == 0) {
-		addLogMessage("got ping response", "");
+		addLogMessage("got ping response", " 9");
 	} else {
 		addLogMessage("got unknown response: ",  msg);
 	}
@@ -337,7 +341,7 @@ int initialiseSocket() {
 	if (sock < 0)
 	{
 		strncpy(errMsg, "Error: Socket?", sizeof(errMsg) - 1);
-		addLogMessage(errMsg, "");
+		addLogMessage(errMsg, " 10");
 		return sock;
 	}
 
@@ -355,7 +359,7 @@ void closeSocket(int sock) {
 	}
 }
 
-int sendArduino(char* msg) {
+int sendArduino(char* msg, bool waitForReply) {
 
 	if (! udpOK) {
 		sock = initialiseSocket();
@@ -363,10 +367,11 @@ int sendArduino(char* msg) {
 			return sock;
 		}
 	}
-	char sendBuf[1024];
+	char sendBuf[128];
 
 	// send to Arduino
 	strncpy(sendBuf, msg, sizeof(sendBuf) - 1);
+	//addLogMessage("sending ", sendBuf);
 	int result = sendto(
 				sock,
  				sendBuf,
@@ -378,34 +383,40 @@ int sendArduino(char* msg) {
 	{
 		closeSocket(sock);
 		strncpy(sendBuf, "Error: Send?", sizeof(sendBuf) - 1);
-		addLogMessage(sendBuf, "");
+		addLogMessage(sendBuf, " 11");
 		return result;
 	}
+	//addLogMessage("sent", "");
 
-	// receive from Arduino
-	struct sockaddr_in cliaddr;
-	socklen_t len = sizeof(cliaddr);
-	result = recvfrom(
-			sock,
-		       	(char *)sendBuf, 1024,
-                	MSG_WAITALL,
-		       	(struct sockaddr *) &cliaddr,
-                	&len);
-	if (result > 0) {
-		sendBuf[result] = '\0';
-		actOnMessage(sendBuf);
+	if (waitForReply) {
+		// receive from Arduino
+		struct sockaddr_in cliaddr;
+		socklen_t len = sizeof(cliaddr);
+		char rxBuf[2048];
+		result = recvfrom(
+				sock,
+				(char *)rxBuf,
+				(sizeof(rxBuf)+1),
+				MSG_DONTWAIT,
+				(struct sockaddr *) &cliaddr,
+				&len);
+		if (result > 0) {
+			rxBuf[result] = '\0';
+			//addLogMessage(rxBuf, " 11a");
+			actOnMessage(rxBuf);
+		}
 	}
 
 	return 0;
 }
 
 int pingArduino() {
-	int res = sendArduino((char*) "Hello");
+	int res = sendArduino((char*) "Hello", true);
 	return res;
 }
 
 int readArduinoConf() {
-	int res = sendArduino((char*) "Register");
+	int res = sendArduino((char*) "Register", true);
 	return res;
 }
 
@@ -415,13 +426,13 @@ void	showLog() {
 
 void addLogMessage(const char* msg, const char* extra) {
 	char buf[256];
-	sprintf(buf, "[xpduino] %s%s\n", msg, extra);
+	sprintf(buf, "[xpduino] '%s%s'\n", msg, extra);
 	XPLMDebugString(buf);
 }
 
 void addLogMessagei(const char* msg, const int extra) {
 	char buf[256];
-	sprintf(buf, "[xpduino] %s%i\n", msg, extra);
+	sprintf(buf, "[xpduino](i)  %s%i\n", msg, extra);
 	XPLMDebugString(buf);
 }
 

@@ -1,6 +1,7 @@
 # Arduino Make file. Refer to https://github.com/sudar/Arduino-Makefile
 
-BOARD_TAG    = uno
+#BOARD_TAG    = uno
+BOARD_TAG    = mega2560
 ARDUINO_PORT = /dev/ttyACM1
 ARDUINO_LIBS = SPI Ethernet
 include /usr/share/arduino/Arduino.mk

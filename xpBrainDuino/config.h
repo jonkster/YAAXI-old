@@ -15,6 +15,7 @@ typedef struct {
 	xpResponseHandler handler;	// callback function
 } drConfig;
 
+
 /* the array of handler details */
 drConfig	drHandlers[MAX_HANDLERS];
 int		drConfigIdx = 0;
@@ -47,6 +48,12 @@ void addDataRefHandler(drConfig item) {
 	}
 }
 
+drConfig nullHandler = {
+	-1,
+	(char*)"no handler configured with this id",
+	&printIdxValue
+};
+
 void newEntry(const char* drPath, const xpResponseHandler handler) {
 	drConfig entry = { 
 		-1,
@@ -64,25 +71,24 @@ void newEntry(const char* drPath, const xpResponseHandler handler) {
 
 
 drConfig getHandler(const int handlerId) {
-	if (handlerId < MAX_HANDLERS) {
+	if (handlerId < drConfigIdx) {
 		return drHandlers[handlerId];
 	} else {
-		drConfig entry = { 
-			handlerId,
-			(char*)"no handler configured with this id",
-			&printIdxValue
-		};
-		displayHandler(handlerId);
-		return entry;
+		Serial.println("no handler!");
+		return nullHandler;
 	}
 }
 
-void displayHandler(int id) {
-	drConfig item = drHandlers[id];
+void displayItem(drConfig item) {
 	Serial.print("#"); Serial.print(item.id);
 	Serial.print(", dataref:"); Serial.print(item.drPath);
 	void* cbPtr = (void*)item.handler;
 	Serial.print(", callback:"); Serial.println((int)cbPtr);
+}
+
+void displayHandler(int id) {
+	drConfig item = drHandlers[id];
+	displayItem(item);
 }
 
 void displayHandlers() {
@@ -96,8 +102,9 @@ void confResponse(EthernetUDP Udp) {
 	for (int i = 0; i < drConfigIdx; i++) {
 		drConfig item = drHandlers[i];
 		const char* path = item.drPath;
-		Udp.write(path);
-		Udp.write("\n");
+		char msg[1024];
+		snprintf(msg, sizeof(msg)-1, "%s\n", path);
+		Udp.write(msg);
 		Serial.print("sent value: ");
 		Serial.println(path);
 	}
