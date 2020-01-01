@@ -33,6 +33,8 @@ int lastRotEncTime0;
 int lastRotEncTime1;
 int previousClk0; 
 int previousClk1; 
+int previousDT0; 
+int previousDT1; 
 void initPins() {
 	// Set encoder pins
 	pinMode (inputCLK0, INPUT);
@@ -61,6 +63,8 @@ void initPins() {
 	// Read the initial state of Inputs
 	previousClk0 = digitalRead(inputCLK0);
 	previousClk1 = digitalRead(inputCLK1);
+	previousDT0 = digitalRead(inputDT0);
+	previousDT1 = digitalRead(inputDT1);
 	lastRotEncTime0 = millis();
 	lastRotEncTime1 = millis();
 
@@ -77,10 +81,56 @@ void initPins() {
 
 }
 
-int readEncoder(const int currentClk, const int currentDT, const int previousClk, const int revTime) {
+bool validTransition(const int previousClk, const int previousDT, const int currentClk, const int currentDT) {
+	if ((previousClk == 0) && (previousDT == 0)) {
+		if (currentClk != currentDT) {
+			return true;
+		}
+		return false;
+	} else if ((previousClk == 0) && (previousDT == 1)) {
+		if (currentClk == currentDT) {
+			return true;
+		}
+		return false;
+	} else if ((previousClk == 1) && (previousDT == 0)) {
+		if (currentClk == currentDT) {
+			return true;
+		}
+		return false;
+	} else if ((previousClk == 1) && (previousDT == 1)) {
+		if (currentClk != currentDT) {
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+int yold = 0;
+int flag = 0;
+int debounceFilter(int value) {
+	int tmp = (yold >> 2);
+	yold = yold - tmp;
+	if (value > 0) {
+		yold = yold + 0x3F;
+	}
+	if ((yold > 0xF0) && (flag == 0)) {
+		flag=1;
+	       	output=1;
+	}
+	else if ((yold < 0x0F) && (flag == 1)) {
+		flag=0;
+	       	output=0;
+	}
+}
+
+int readEncoder(const int currentClk, const int currentDT, const int previousClk, const int previousDT, const int revTime) {
 	int delta = 0;
 	// If the previous and the current state of the inputCLK are different then a pulse has occured
 	if (currentClk != previousClk){ 
+		if (! validTransition(currentClk, currentDT, previousClk, previousDT)) {
+			return 0;
+		}
 		if (revTime < 2) {
 			delta = 8;
 		} else if (revTime < 20) {

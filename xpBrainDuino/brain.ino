@@ -103,7 +103,7 @@ void loop() {
 	int currentClk = digitalRead(inputCLK0);
 	int currentDT = digitalRead(inputDT0);
 	int delta = 0;
-	delta = readEncoder(currentClk, currentDT, previousClk0, millis() - lastRotEncTime0);
+	delta = readEncoder(currentClk, currentDT, previousClk0, previousDT0, millis() - lastRotEncTime0);
 	previousClk0 = currentClk; 
 	if (delta != 0) {
 		bug0Changed = true;
@@ -114,12 +114,13 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg0 = hdg;
+		Serial.println(bugHdg0);
 	}
 
 	// read encoder 1
 	currentClk = digitalRead(inputCLK1);
 	currentDT = digitalRead(inputDT1);
-	delta = readEncoder(currentClk, currentDT, previousClk1, millis() - lastRotEncTime1);
+	delta = readEncoder(currentClk, currentDT, previousClk1, previousDT1, millis() - lastRotEncTime1);
 	previousClk1 = currentClk; 
 	if (delta != 0) {
 		bug1Changed = true;
@@ -130,6 +131,7 @@ void loop() {
 			hdg += 360;
 		}
 		bugHdg1 = hdg;
+		Serial.println(bugHdg1);
 	}
 
 	readToggles();	

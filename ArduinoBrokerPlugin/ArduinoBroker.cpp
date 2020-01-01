@@ -45,7 +45,8 @@
 #define ARD_CMD_LOG +9999997
 #define ARD_CMD_PAUSE 0
 
-#define REFRESH_RATE_SECS  0.01
+#define REFRESH_RATE_SECS  0.002
+//#define REFRESH_RATE_SECS  0.005
 
 char ardLog[50][128] = {
 	"",
