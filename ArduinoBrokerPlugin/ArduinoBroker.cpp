@@ -19,8 +19,8 @@
 #include "XPLMMenus.h"
 #include "XPLMProcessing.h"
 #include "XPLMUtilities.h"
-#include "XPStandardWidgets.h"
-#include "XPWidgets.h"
+//#include "XPStandardWidgets.h"
+//#include "XPWidgets.h"
 
 
 #if IBM
@@ -42,7 +42,7 @@
 #define ARD_IP "192.168.0.177"
 #define ARD_CMD_PING +9999999
 #define ARD_CMD_REGISTER +9999998
-#define ARD_CMD_LOG +9999997
+#define ARD_CMD_PAUSEPI +9999997
 #define ARD_CMD_PAUSE 0
 
 #define REFRESH_RATE_SECS  0.002
@@ -59,8 +59,6 @@ char ardLog[50][128] = {
 };
 int		ardLogIdx = 0;
 bool		ardLogVisible = false;
-XPWidgetID	ardLogWidget = NULL;
-XPWidgetID	ardLogTextWidget[50] = {NULL};
 
 XPLMDataRef	activeDataRefs[32];
 char		activeDataPaths[32][64];
@@ -69,8 +67,9 @@ char		activeDataActions[32];
 int		activeDataIdx = 0;
 int		sendIdx = 0;
 bool		sendData = false;
+bool		active = false;
 bool		udpOK = false;
-int		sock;
+int		sock = -1;
 struct		sockaddr_in server;
 
 char		rxMsg[256];
@@ -80,11 +79,9 @@ static void	menuHandlerCallback(void*, void*);
 float		flightLoopCallback(float, float, int, void*);
 int		readArduinoConf();
 int 		sendArduino(char*, bool);
-void		createLogWidget(int, int, int, int);
-int		ardLogHandler(XPWidgetMessage, XPWidgetID, long, long);
+bool		getReply(int sock);
 void		addLogMessage(const char*, const char*);
 void		addLogMessagei(const char*, const int);
-void		showLog();
 void		closeSocket(int);
 
 PLUGIN_API int XPluginStart( char *  outName, char *  outSig, char *  outDesc)
@@ -111,12 +108,10 @@ PLUGIN_API int XPluginStart( char *  outName, char *  outSig, char *  outDesc)
 			0);				/* Handler Ref */
 
 	// Menu Lines
-	XPLMAppendMenuItem(myMenu, "Pause", (void *) ARD_CMD_PAUSE, 1);
+	XPLMAppendMenuItem(myMenu, "Pause XP", (void *) ARD_CMD_PAUSE, 1);
+	XPLMAppendMenuItem(myMenu, "Pause Plugin", (void *) ARD_CMD_PAUSEPI, 1);
 	XPLMAppendMenuItem(myMenu, "Ping Arduino", (void *) ARD_CMD_PING, 1);
-	XPLMAppendMenuItem(myMenu, "Show Log", (void *) ARD_CMD_LOG, 1);
 	XPLMAppendMenuItem(myMenu, "Register Arduino Config", (void *) ARD_CMD_REGISTER, 1);
-
-	
 
 	// main loop
 	XPLMRegisterFlightLoopCallback(
@@ -125,17 +120,22 @@ PLUGIN_API int XPluginStart( char *  outName, char *  outSig, char *  outDesc)
 			NULL);
 
 
+	addLogMessage("Staring Plugin", "");
+	active = true;
+	pingArduino();
 	return 1;
 }
 
+
 PLUGIN_API void	XPluginStop(void) {
 	XPLMUnregisterFlightLoopCallback(flightLoopCallback, NULL);
-	XPDestroyWidget(ardLogWidget, 1);
 	closeSocket(sock);
 }
 PLUGIN_API void XPluginDisable(void) { }
 PLUGIN_API int XPluginEnable(void) { return 1; }
 PLUGIN_API void XPluginReceiveMessage( XPLMPluginID inFromWho, int inMessage, void * inParam) { }
+
+
 
 void menuHandlerCallback(void * inMenuRef, void * inItemRef)
 {
@@ -143,8 +143,8 @@ void menuHandlerCallback(void * inMenuRef, void * inItemRef)
 		pingArduino();
 	} else if (inItemRef == (void*) ARD_CMD_REGISTER) {
 		readArduinoConf();
-	} else if (inItemRef == (void*) ARD_CMD_LOG) {
-		showLog();
+	} else if (inItemRef == (void*) ARD_CMD_PAUSEPI) {
+		active = ! active;
 	} else if (inItemRef == (void*) ARD_CMD_PAUSE) {
 		XPLMCommandKeyStroke(xplm_key_pause);
 		
@@ -152,6 +152,7 @@ void menuHandlerCallback(void * inMenuRef, void * inItemRef)
 	}
 }
 
+int c = 0;
 float	flightLoopCallback(
 		float inElapsedSinceLastCall,
 		float inElapsedTimeSinceLastFlightLoop,
@@ -166,7 +167,12 @@ float	flightLoopCallback(
 	if (sendIdx >= activeDataIdx) {
 		sendIdx = 0;
 	}
-	if (sendData) {
+	if (activeDataIdx == 0) {
+		if ((c++ % 100) == 0) {
+			addLogMessagei("read conf:", c);
+			readArduinoConf();
+		}
+	} else if (sendData) {
 		char* propType = activeDataTypes[sendIdx];
 		char getOrSet =	activeDataActions[sendIdx];
 		XPLMDataRef dRef = activeDataRefs[sendIdx];
@@ -190,6 +196,10 @@ float	flightLoopCallback(
 		// this slow...
 		sendArduino(msg, true);
 		sendIdx++;
+	} else {
+		if (sock != -1) {
+			getReply(sock);
+		}
 	}
 	return REFRESH_RATE_SECS; // seconds before next call
 }
@@ -216,6 +226,7 @@ void registerProperty(char *request) {
 	activeDataIdx = 0;
 	char  buff[1024];
 	strncpy(buff, request, sizeof(buff) - 1);
+	addLogMessage("register request: ", buff);
 	char delim[] = ":\n\r\t";
 
 	XPLMDataRef prop;
@@ -234,6 +245,7 @@ void registerProperty(char *request) {
 				if (ptr != NULL) {
 					strncpy(propType, ptr, sizeof(propType) - 1);
 					ptr = strtok(NULL, delim);
+					// pointer will have RW flag if it exists
 					if (ptr != NULL) {
 						strncpy(getOrSet, ptr, sizeof(getOrSet) - 1);
 						found = true;
@@ -247,6 +259,8 @@ void registerProperty(char *request) {
 			} else {
 				addLogMessage("invalid register string, no path??", " 5");
 			}
+		} else if (strncmp(ptr, "O", 1) == 0) {
+			addLogMessage("Recv'd OK:", ptr);
 		} else {
 			addLogMessage("invalid register string, no 'R' prefix??", ptr);
 		}
@@ -316,6 +330,7 @@ void setXPData(const char *msg) {
 }
 
 void actOnMessage(char* msg) {
+	//addLogMessage("acting on msg:", msg);
 	if (strlen(msg) == 0) {
 		return;
 	} else if (strncmp(msg, "R:", 2) == 0) {
@@ -323,9 +338,14 @@ void actOnMessage(char* msg) {
 		addLogMessage("got register response", " 8");
 		registerProperty(msg);
 		sendData = true;
+	} else if (strncmp(msg, "W:", 2) == 0) {
+		//addLogMessage("got write response", " 8.1");
+		setXPData(msg); // got a 'write' response
 	} else if (strncmp(msg, "S:", 2) == 0) {
-		setXPData(msg);
+		//addLogMessage("got set response", " 8.1a");
+		setXPData(msg); // got a 'write' response
 	} else if (strncmp(msg, "O", 1) == 0) {
+		//addLogMessage("got O response", " 8.2");
 		return; // just acknowledgement
 	} else if (strncmp(msg, "Yes Hello!", 10) == 0) {
 		addLogMessage("got ping response", " 9");
@@ -338,7 +358,8 @@ int initialiseSocket() {
 	udpOK = false;
 	char errMsg[256];
 	unsigned short port = htons(ARD_PORT);
-	int sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+	//int sock = socket(AF_INET, SOCK_DGRAM, 0);
+	sock = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
 	if (sock < 0)
 	{
 		strncpy(errMsg, "Error: Socket?", sizeof(errMsg) - 1);
@@ -360,7 +381,34 @@ void closeSocket(int sock) {
 	}
 }
 
+bool getReply(int sock) {
+	struct sockaddr_in cliaddr;
+	socklen_t len = sizeof(cliaddr);
+	char rxBuf[2048];
+	int result = recvfrom(
+			sock,
+			(char *)rxBuf,
+			(sizeof(rxBuf)+1),
+			MSG_DONTWAIT,
+			(struct sockaddr *) &cliaddr,
+			&len);
+	if (result > 0) {
+		rxBuf[result] = '\0';
+		//addLogMessage(rxBuf, " 11a");
+		actOnMessage(rxBuf);
+		return true;
+	} else {
+		addLogMessage("no response?", "");
+		return false;
+	}
+}
+
 int sendArduino(char* msg, bool waitForReply) {
+
+	if (! active) {
+		addLogMessage("plugin paused", "");
+		return 0;
+	}
 
 	if (! udpOK) {
 		sock = initialiseSocket();
@@ -372,7 +420,7 @@ int sendArduino(char* msg, bool waitForReply) {
 
 	// send to Arduino
 	strncpy(sendBuf, msg, sizeof(sendBuf) - 1);
-	//addLogMessage("sending ", sendBuf);
+	//addLogMessage("sending:", msg);
 	int result = sendto(
 				sock,
  				sendBuf,
@@ -387,27 +435,15 @@ int sendArduino(char* msg, bool waitForReply) {
 		addLogMessage(sendBuf, " 11");
 		return result;
 	}
-	//addLogMessage("sent", "");
+	//addLogMessage("sent:", msg);
 
 	if (waitForReply) {
-		// receive from Arduino
-		struct sockaddr_in cliaddr;
-		socklen_t len = sizeof(cliaddr);
-		char rxBuf[2048];
-		result = recvfrom(
-				sock,
-				(char *)rxBuf,
-				(sizeof(rxBuf)+1),
-				MSG_DONTWAIT,
-				(struct sockaddr *) &cliaddr,
-				&len);
-		if (result > 0) {
-			rxBuf[result] = '\0';
-			//addLogMessage(rxBuf, " 11a");
-			actOnMessage(rxBuf);
+		int i = 0;
+		if (! getReply(sock) && (i < 10)) {
+			getReply(sock);
+			i++;
 		}
 	}
-
 	return 0;
 }
 
@@ -421,86 +457,16 @@ int readArduinoConf() {
 	return res;
 }
 
-void	showLog() {
-	createLogWidget(50, 712, 974, 662);	//left, top, right, bottom.
-}
 
 void addLogMessage(const char* msg, const char* extra) {
-	char buf[256];
+	char buf[512];
 	sprintf(buf, "[xpduino] '%s%s'\n", msg, extra);
 	XPLMDebugString(buf);
 }
 
 void addLogMessagei(const char* msg, const int extra) {
-	char buf[256];
+	char buf[512];
 	sprintf(buf, "[xpduino](i)  %s%i\n", msg, extra);
 	XPLMDebugString(buf);
 }
 
-void addLogMessageWid(const char* msg) {
-
-	char  buff[512];
-	char delim[] = "\n";
-	strncpy(buff, msg, sizeof(buff) - 1);
-	char *ptr = strtok(buff, delim);
-	while (ptr != NULL) {
-		if (ardLogIdx >= 20) {
-			for (int i = 0; i < ardLogIdx; i++) {
-				strncpy(ardLog[i], ardLog[i+1], sizeof(ardLog[i]) - 1);
-			}
-			ardLogIdx--;
-		}
-		strncpy(ardLog[ardLogIdx++], ptr, sizeof(ardLog[ardLogIdx++]) - 1);
-		strncpy(ardLog[ardLogIdx + 1], (char*) "end", 4);
-		ptr = strtok(NULL, delim);
-	}
-}
-
-void createLogWidget(int x, int y, int w, int h)
-{
-	int Index;
-	int x2 = x + w;
-	int y2 = y - h;
-	// Create the Main Widget window.
-	ardLogWidget = XPCreateWidget(
-			x,
-			y,
-			x2,
-			y2,
-			1,		// Visible
-			"Arduino Log",	// desc
-			1,		// root
-			NULL,		// no container
-			xpWidgetClass_MainWindow);
-
-	// Add Close Box to the Main Widget.  Other options are available.  See the SDK Documentation.
-	XPSetWidgetProperty(ardLogWidget, xpProperty_MainWindowHasCloseBoxes, 1);
-	// Print each line of instructions.
-	for (Index=0; Index < 50; Index++)
-	{
-		if(strcmp(ardLog[Index], "end") == 0) {break;}
-		// Create a text widget
-		ardLogTextWidget[Index] = XPCreateWidget(x+10, y-(30+(Index*20)) , x2-10, y-(42+(Index*20)),
-				1,	// Visible
-				ardLog[Index],// desc
-				0,		// root
-				ardLogWidget,
-				xpWidgetClass_Caption);
-	}
-	// Register our widget handler
-	XPAddWidgetCallback(ardLogWidget, ardLogHandler);
-	ardLogVisible = true;
-}
-
-int ardLogHandler(XPWidgetMessage  inMessage, XPWidgetID  inWidget, long  inParam1, long  inParam2) {
-	if (inMessage == xpMessage_CloseButtonPushed)
-	{
-		if (ardLogVisible)
-		{
-			XPHideWidget(ardLogWidget);
-			ardLogVisible = false;
-		}
-		return 1;
-	}
-	return 0;
-}
