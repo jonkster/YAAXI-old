@@ -126,7 +126,7 @@ receives info on this dataref from X-Plane.
 
 
 #### Example Configuration
-```C++
+```C
 void registerXP() {
 	newEntry((char*)"R:sim/cockpit/engine/fuel_pump_on:vi:w", &setXPFuelPump);
 	newEntry((char*)"R:sim/cockpit/engine/fuel_tank_selector:i:w", &setXPFuelTank);
@@ -145,13 +145,13 @@ Callback functions are of type ```xpResponseHandler```.
 They return a void and will have 2 arguments set, an integer (the index of the
 dataref) and a char* (the dataref value from X-Plane)
 ie:
-```C++
+```C
 typedef void (*xpResponseHandler)(const int, const char*);
 ```
 
 
 ### Very simple callback that just prints details on what it has received from X-Plane and doesn't respond
-```C++
+```C
 // an example handler callback function
 void printIdxValue(const int idx, const char* value) {
         Serial.print("dummy handler - idx:");
@@ -165,7 +165,7 @@ If you wish to reply to X-Plane (eg with new values for the dataref) create a
 suitable response string and pass it to the ```queueUdp``` function.
 
 ### examples of callbacks:
-```C++
+```C
 void setXPFuelPump(const int idx, const char *value) {
 	if (hasSwitchChanged(TOGGLE0) || hasSwitchChanged(TOGGLE1)) {
 		int pumpState = 0;
