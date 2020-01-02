@@ -114,7 +114,6 @@ void setXPOBS(const int idx, const char* value) {
 
 int nav1AFreq = 11090;
 int nav1SFreq = 11090;
-
 void toggleXPNavFreqs(const int sfreq, const int afreq) {
 	nav1AFreq = afreq;
 	nav1SFreq = sfreq;

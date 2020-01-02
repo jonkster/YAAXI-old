@@ -37,7 +37,6 @@ void dumpQueue() {
 	if (sendIdx > 0) {
 		sendIdx--;
 		Udp.write(sendQueue[sendIdx]);
-		//Serial.print("udp:"); Serial.println(sendQueue[sendIdx]);
 	} else {
 		char buf[32];
 		memset(buf, 0, sizeof(buf));
@@ -50,10 +49,10 @@ void dumpQueue() {
 
 // an example handler callback function
 void printIdxValue(const int idx, const char* value) {
-/*	Serial.print("idx:");
+	Serial.print("dummy handler - idx:");
 	Serial.print(idx);
 	Serial.print(", value:");
-	Serial.println(value);*/
+	Serial.println(value);
 }
 
 void addDataRefHandler(drConfig item) {
@@ -135,7 +134,6 @@ void confResponse() {
 		char msg[1024];
 		snprintf(msg, sizeof(msg)-1, "%s\n", path);
 		Udp.write(msg);
-		Serial.print("udp send:"); Serial.println(msg);
 	}
 	Udp.write("O\n");
 }
@@ -143,7 +141,6 @@ void confResponse() {
 void replyPing() {
 	char value[] = "Yes Hello!\n";
 	Udp.write(value);
-	Serial.print("udp send:"); Serial.println(value);
 	showPingLight();
 }
 
