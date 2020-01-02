@@ -69,24 +69,34 @@ void addDataRefHandler(drConfig item) {
 drConfig nullHandler = {
 	-1,
 	(char*)"no handler configured with this id",
-	&printIdxValue
+	&printIdxValue,
+	false
 };
 
-void newEntry(const char* drPath, const xpResponseHandler handler) {
-	drConfig entry = { 
-		-1,
-		drPath,
-		handler	
-	};
-	if (drConfigIdx < MAX_HANDLERS) {
-		entry.id = drConfigIdx;
-		drHandlers[drConfigIdx++] = entry;
-	} else {
-		Serial.println("Max handlers registered, cannot add new handler: ");
-		Serial.println(drPath);
+bool pathHasReplyFlag(const char* drPath) {
+	char delim[] = ":";
+	char buf[32];
+	memset(buf, 0, sizeof(buf));
+	strncpy(buf, drPath, sizeof(buf) - 1);
+	char *ptr = strtok(buf, delim);
+	if (ptr != NULL) {
+		// ptr should be R
+		ptr = strtok(NULL, delim);
+		if (ptr != NULL) {
+			// ptr should be path
+			ptr = strtok(NULL, delim);
+			if (ptr != NULL) {
+				// ptr should be data type flag
+				ptr = strtok(NULL, delim);
+				if (ptr != NULL) {
+					// ptr should be reply (R or N) flag
+					return (strncmp(ptr, "R", 1) == 0);
+				}
+			}
+		}
 	}
+	return false;
 }
-
 
 drConfig getHandler(const int handlerId) {
 	if (handlerId < drConfigIdx) {
@@ -97,9 +107,35 @@ drConfig getHandler(const int handlerId) {
 	}
 }
 
+
+bool handlerHasReplyFlag(const int idx) {
+	drConfig handler = getHandler(idx);
+	return handler.reply;
+}
+
+
+void newEntry(const char* drPath, const xpResponseHandler handler) {
+	drConfig entry = { 
+		-1,
+		drPath,
+		handler,
+		pathHasReplyFlag(drPath)
+	};
+
+	if (drConfigIdx < MAX_HANDLERS) {
+		entry.id = drConfigIdx;
+		drHandlers[drConfigIdx++] = entry;
+	} else {
+		Serial.println("Max handlers registered, cannot add new handler: ");
+		Serial.println(drPath);
+	}
+}
+
+
 void displayItem(drConfig item) {
 	Serial.print("#"); Serial.print(item.id);
 	Serial.print(", dataref:"); Serial.print(item.drPath);
+	Serial.print(", send reply:"); Serial.print(item.reply);
 	void* cbPtr = (void*)item.handler;
 	Serial.print(", callback:"); Serial.println((int)cbPtr);
 }
@@ -116,10 +152,11 @@ void displayHandlers() {
 }
 
 
-void handleXPData(const char* regIdx, const char* value) {
+void handleXPData(const char* regIdx, const char* value, const char* replyFlag) {
 	const int idx = atoi(regIdx);
 	drConfig entry = getHandler(idx);
 	if (entry.id >= 0) {
+		//Serial.print("handling: "); Serial.println(idx);
 		entry.handler(idx, value);
 	}
 	dumpQueue();
@@ -132,7 +169,7 @@ void confResponse() {
 		drConfig item = drHandlers[i];
 		const char* path = item.drPath;
 		char msg[1024];
-		snprintf(msg, sizeof(msg)-1, "%s\n", path);
+		snprintf(msg, sizeof(msg)-1, "D:%s\n", path);
 		Udp.write(msg);
 	}
 	Udp.write("O\n");
@@ -151,6 +188,7 @@ void serialSetup() {
 
 
 void parseData(const char* msg) {
+	//Serial.print("parsing: "); Serial.println(msg);
 	char delim[] = ":";
 	char buf[32];
 	memset(buf, 0, sizeof(buf));
@@ -161,20 +199,21 @@ void parseData(const char* msg) {
 	char value[32];
 	memset(value, 0, sizeof(value));
 	if (ptr != NULL) {
-		if ((strncmp(ptr, "W", 1) == 0) || (strncmp(ptr, "R", 1) == 0)) {
+		char replyFlag[4];
+		strncpy(replyFlag, ptr, sizeof(replyFlag) - 1);
+		if ((strncmp(replyFlag, "N", 1) == 0) || (strncmp(replyFlag, "R", 1) == 0)) {
 			ptr = strtok(NULL, delim);
 			if (ptr != NULL) {
 				strncpy(regIdx, ptr, sizeof(regIdx) - 1);
 				ptr = strtok(NULL, delim);
 				if (ptr != NULL) {
 					strncpy(value, ptr, sizeof(value) - 1);
-					handleXPData(regIdx, value);					
+					handleXPData(regIdx, value, replyFlag);					
 					return;
 				}
 			}
 		}
 	}
-	Udp.write("parse failed");
 	return;
 }
 
@@ -215,29 +254,16 @@ void updateComms() {
 				replyPing();
 			} else if (strncmp(packetBuffer, "R:", 2) == 0) {
 				parseData(packetBuffer);
-			} else if (strncmp(packetBuffer, "W:", 2) == 0) {
+			} else if (strncmp(packetBuffer, "N:", 2) == 0) {
 				parseData(packetBuffer);
 			} else if (strncmp(packetBuffer, "Register", 8) == 0) {
-			    confResponse();
+			    	confResponse();
 			} else {
 				char buf[32];
 				memset(buf, 0, sizeof(buf));
 				snprintf(buf, sizeof(buf)-1, "Unknown command: %s", packetBuffer);
 				Udp.write(buf);
 			}
-			
-			/* else if (strncmp(packetBuffer, "S:", 2) == 0) {
-			    parseData(packetBuffer);
-			    } else if (strncmp(packetBuffer, "G:", 2) == 0) {
-			    parseData(packetBuffer);
-			    } else if (strncmp(packetBuffer, "Register", 8) == 0) {
-			    confResponse(Udp);
-			    } else {
-			    char buf[32];
-			    memset(buf, 0, sizeof(buf));
-			    snprintf(buf, sizeof(buf)-1, "Unknown command: %s", packetBuffer);
-			    Udp.write(buf);
-			    }*/
 			Udp.endPacket();
 		}
 	}

@@ -18,7 +18,7 @@ void setXPFuelPump(const int idx, const char *value) {
 		}
 		char buf[32];
 		memset(buf, 0, sizeof(buf));
-		snprintf(buf, sizeof(buf)-1, "S:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, pumpState);
+		snprintf(buf, sizeof(buf)-1, "V:%i:[%i, 0, 0, 0, 0, 0, 0]", idx, pumpState);
 		queueUdp(buf);
 	}
 }
@@ -35,7 +35,7 @@ void setXPFuelTank(const int idx, const char *value) {
 		}
 		char buf[32];
 		memset(buf, 0, sizeof(buf));
-		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, s);
+		snprintf(buf, sizeof(buf)-1, "V:%i:%i", idx, s);
 		queueUdp(buf);
 	}
 }
@@ -93,7 +93,7 @@ void setXPHeadingBug(const int idx, const char* value) {
 
 		char buf[32];
 		memset(buf, 0, sizeof(buf));
-		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, v);
+		snprintf(buf, sizeof(buf)-1, "V:%i:%i", idx, v);
 		queueUdp(buf);
 	}
 }
@@ -107,39 +107,89 @@ void setXPOBS(const int idx, const char* value) {
 		v = v % 360;
 		char buf[32];
 		memset(buf, 0, sizeof(buf));
-		snprintf(buf, sizeof(buf)-1, "S:%i:%i", idx, v);
+		snprintf(buf, sizeof(buf)-1, "V:%i:%i", idx, v);
 		queueUdp(buf);
 	}
 }
-
-int nav1AFreq = 11090;
-int nav1SFreq = 11090;
-void toggleXPNavFreqs(const int sfreq, const int afreq) {
-	nav1AFreq = afreq;
-	nav1SFreq = sfreq;
+void toggleXPComFreqs(const int activ, const int stdby) {
 	char buf[32];
 	memset(buf, 0, sizeof(buf));
-	snprintf(buf, sizeof(buf)-1, "S:%i:%i", 5, nav1AFreq);
+
+	snprintf(buf, sizeof(buf)-1, "V:%i:%i", 9, activ);
 	queueUdp(buf);
-	snprintf(buf, sizeof(buf)-1, "S:%i:%i", 6, nav1SFreq);
+	Serial.print("change stdby to:"); Serial.println(buf);
+
+	memset(buf, 0, sizeof(buf));
+	snprintf(buf, sizeof(buf)-1, "V:%i:%i", 8, stdby);
 	queueUdp(buf);
+	Serial.print("change active to:"); Serial.println(buf);
 }
 
-void getXPNav1ActiveFreq(const int idx, const char* value) {
+void toggleXPNavFreqs(const int activ, const int stdby) {
+	char buf[32];
+	memset(buf, 0, sizeof(buf));
+
+	snprintf(buf, sizeof(buf)-1, "V:%i:%i", 7, activ);
+	queueUdp(buf);
+	Serial.print("change stdby to:"); Serial.println(buf);
+
+	memset(buf, 0, sizeof(buf));
+	snprintf(buf, sizeof(buf)-1, "V:%i:%i", 6, stdby);
+	queueUdp(buf);
+	Serial.print("change active to:"); Serial.println(buf);
+}
+
+int com1AFreq = 12510;
+int com1SFreq = 12190;
+void getXPCom1Freq(const int idx, const char* value) {
 	int f = atoi(value);
-	if (f != nav1AFreq) {
+	if (idx == 8) {
+		com1AFreq = f;
+	} else if (idx == 9) {
+		com1SFreq = f;
+	} 
+	if (hasSwitchChanged(PUSH0)) {
+		if (switchValue(PUSH0) == 0) {
+			toggleXPComFreqs(com1AFreq, com1SFreq);
+		}
+	}
+}
+
+
+int nav1AFreq = 10880;
+int nav1SFreq = 11770;
+void getXPNav1Freq(const int idx, const char* value) {
+	int f = atoi(value);
+	if (idx == 6) {
 		nav1AFreq = f;
-		Serial.print("act=");
-		Serial.println(f);
+	} else if (idx == 7) {
+		nav1SFreq = f;
+	} 
+	if (hasSwitchChanged(PUSH1)) {
+		if (switchValue(PUSH1) == 0) {
+			toggleXPNavFreqs(nav1AFreq, nav1SFreq);
+		}
 	}
 }
 
-void getXPNav1StandbyFreq(const int idx, const char* value) {
-	int f = atoi(value);
-	if (f != nav1SFreq) {
-		nav1SFreq = f;
-		Serial.print("sby=");
-		Serial.println(f);
+void setHSISrc(const int idx, const char* value) {
+	if (hasSwitchChanged(PUSH2)) {
+		if (switchValue(PUSH2) == 0) {
+			char buf[32];
+			memset(buf, 0, sizeof(buf));
+			int v = atoi(value);
+
+			if (v == 0) {
+				v = 2;
+			} else if (v == 2) {
+				v = 0;
+			}
+			snprintf(buf, sizeof(buf)-1, "V:%i:%i", idx, v);
+			queueUdp(buf);
+			
+		}
 	}
 }
+
+
 

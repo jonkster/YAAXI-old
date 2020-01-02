@@ -226,7 +226,7 @@ void registerProperty(char *request) {
 	activeDataIdx = 0;
 	char  buff[1024];
 	strncpy(buff, request, sizeof(buff) - 1);
-	addLogMessage("register request: ", buff);
+	//addLogMessage("register request: ", buff);
 	char delim[] = ":\n\r\t";
 
 	XPLMDataRef prop;
@@ -237,7 +237,7 @@ void registerProperty(char *request) {
 	char *ptr = strtok(buff, delim);
 	while (ptr != NULL) {
 		// discard "R"
-		if (strncmp(ptr, "R", 1) == 0) {
+		if (strncmp(ptr, "D", 1) == 0) {
 			ptr = strtok(NULL, delim);
 			if (ptr != NULL) {
 				strncpy(propPath, ptr, sizeof(propPath) - 1);
@@ -245,13 +245,13 @@ void registerProperty(char *request) {
 				if (ptr != NULL) {
 					strncpy(propType, ptr, sizeof(propType) - 1);
 					ptr = strtok(NULL, delim);
-					// pointer will have RW flag if it exists
+					// pointer will have Reply(R) or NoReply(N) flag if it exists
 					if (ptr != NULL) {
 						strncpy(getOrSet, ptr, sizeof(getOrSet) - 1);
 						found = true;
 						addDataRef(toupper(getOrSet[0]), propType, propPath);
 					} else {
-						addLogMessage("invalid register string, no get or set??", " 3");
+						addLogMessage("invalid register string, no reply flag??", " 3");
 					}
 				} else {
 					addLogMessage("invalid register string, no type??", " 4");
@@ -260,9 +260,9 @@ void registerProperty(char *request) {
 				addLogMessage("invalid register string, no path??", " 5");
 			}
 		} else if (strncmp(ptr, "O", 1) == 0) {
-			addLogMessage("Recv'd OK:", ptr);
+			//addLogMessage("Recv'd OK:", ptr);
 		} else {
-			addLogMessage("invalid register string, no 'R' prefix??", ptr);
+			addLogMessage("invalid register string, no 'D' prefix??", request);
 		}
 		ptr = strtok(NULL, delim);
 	}
@@ -282,6 +282,8 @@ void translateIntArrayString(int* iVector, const char *val) {
 }
 
 void setXPData(const char *msg) {
+	// expect something like:
+	// 	V:2:090
 	char  buff[32];
 	strncpy(buff, msg, sizeof(buff) - 1);
 	char delim[] = ":";
@@ -298,7 +300,7 @@ void setXPData(const char *msg) {
 				int idx = atoi(idxSt);
 				if (idx < activeDataIdx) {
 					if (idx == 5) {
-						addLogMessage("v:",  msg);
+						//addLogMessage("v:",  msg);
 					}
 					char* propType = activeDataTypes[idx];
 					if (strncmp(propType, "i", 2) == 0) {
@@ -315,17 +317,19 @@ void setXPData(const char *msg) {
 						XPLMDataRef dRef = activeDataRefs[idx];
 						XPLMSetDatavi(dRef, iVector, 0, 8);
 					} else {
-						addLogMessage("Cannot set type yet!",  propType);
+						addLogMessage("Cannot set that type yet! ",  propType);
 					}
 				} else {
-					addLogMessagei("idx err?",  idx);
+					addLogMessagei("index# unknown?",  idx);
 				}
 			} else {
 				addLogMessage("no val?",  " 6");
 			}
 		} else {
-			addLogMessage("no S?",  " 7");
+			addLogMessage("no index# ?",  " 7");
 		}
+	} else {
+		addLogMessage("no V prefix?",  " 7");
 	}
 }
 
@@ -333,19 +337,16 @@ void actOnMessage(char* msg) {
 	//addLogMessage("acting on msg:", msg);
 	if (strlen(msg) == 0) {
 		return;
-	} else if (strncmp(msg, "R:", 2) == 0) {
+	} else if (strncmp(msg, "D:", 2) == 0) {
 		sendData = false;
 		addLogMessage("got register response", " 8");
 		registerProperty(msg);
 		sendData = true;
-	} else if (strncmp(msg, "W:", 2) == 0) {
+	} else if (strncmp(msg, "V:", 2) == 0) {
 		//addLogMessage("got write response", " 8.1");
 		setXPData(msg); // got a 'write' response
-	} else if (strncmp(msg, "S:", 2) == 0) {
-		//addLogMessage("got set response", " 8.1a");
-		setXPData(msg); // got a 'write' response
 	} else if (strncmp(msg, "O", 1) == 0) {
-		//addLogMessage("got O response", " 8.2");
+		//addLogMessage("got O(K) response", " 8.2");
 		return; // just acknowledgement
 	} else if (strncmp(msg, "Yes Hello!", 10) == 0) {
 		addLogMessage("got ping response", " 9");
@@ -398,7 +399,7 @@ bool getReply(int sock) {
 		actOnMessage(rxBuf);
 		return true;
 	} else {
-		addLogMessage("no response?", "");
+		//addLogMessage("no response?", "");
 		return false;
 	}
 }
@@ -432,7 +433,7 @@ int sendArduino(char* msg, bool waitForReply) {
 	{
 		closeSocket(sock);
 		strncpy(sendBuf, "Error: Send?", sizeof(sendBuf) - 1);
-		addLogMessage(sendBuf, " 11");
+		//addLogMessage(sendBuf, " 11");
 		return result;
 	}
 	//addLogMessage("sent:", msg);

@@ -20,6 +20,7 @@ typedef struct {
 	int  id;			// unique id#
 	char const *drPath;		// XP dataRef string
 	xpResponseHandler handler;	// callback function
+	bool reply;			// is a reply expected
 } drConfig;
 
 /* register handler details */
@@ -28,6 +29,8 @@ void addDataRefHandler(drConfig);
 /* debug methods - show handler details */
 void displayHandler(int);
 void displayHandlers();
+
+bool handlerHasReplyFlag(const int idx);
 
 void newEntry(const char* drPath, const xpResponseHandler handler);
 

@@ -68,12 +68,15 @@ void taskToggleStatusLed() {
 }
 
 void registerXP() {
-	newEntry((char*)"R:sim/cockpit/engine/fuel_pump_on:vi:w", &setXPFuelPump);
-	newEntry((char*)"R:sim/cockpit/engine/fuel_tank_selector:i:w", &setXPFuelTank);
-	newEntry((char*)"R:sim/cockpit/warnings/annunciators/gear_unsafe:i:r", &getXPGearUnsafe);
-	newEntry((char*)"R:sim/aircraft/parts/acf_gear_deploy:vf:r", &getXPGearLocked);
-	newEntry((char*)"R:sim/cockpit/autopilot/heading:f:w", &setXPHeadingBug);
-	newEntry((char*)"R:sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:w", &setXPOBS);
-	newEntry((char*)"R:sim/cockpit/radios/nav1_freq_hz:i:w", &getXPNav1ActiveFreq);
-	newEntry((char*)"R:sim/cockpit/radios/nav1_stdby_freq_hz:i:w", &getXPNav1StandbyFreq);
+	newEntry((char*)"sim/cockpit/engine/fuel_pump_on:vi:R", &setXPFuelPump);
+	newEntry((char*)"sim/cockpit/engine/fuel_tank_selector:i:R", &setXPFuelTank);
+	newEntry((char*)"sim/cockpit/warnings/annunciators/gear_unsafe:i:N", &getXPGearUnsafe);
+	newEntry((char*)"sim/aircraft/parts/acf_gear_deploy:vf:N", &getXPGearLocked);
+	newEntry((char*)"sim/cockpit/autopilot/heading:f:R", &setXPHeadingBug);
+	newEntry((char*)"sim/cockpit2/radios/actuators/hsi_obs_deg_mag_pilot:f:R", &setXPOBS);
+	newEntry((char*)"sim/cockpit/radios/nav1_freq_hz:i:R", &getXPNav1Freq);
+	newEntry((char*)"sim/cockpit/radios/nav1_stdby_freq_hz:i:R", &getXPNav1Freq);
+	newEntry((char*)"sim/cockpit/radios/com1_freq_hz:i:R", &getXPCom1Freq);
+	newEntry((char*)"sim/cockpit/radios/com1_stdby_freq_hz:i:R", &getXPCom1Freq);
+	newEntry((char*)"sim/cockpit/switches/HSI_selector:i:R", &setHSISrc);
 }

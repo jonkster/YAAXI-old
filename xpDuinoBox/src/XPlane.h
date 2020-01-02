@@ -10,9 +10,9 @@ void getXPGearUnsafe(const int idx, const char* value);
 void getXPGearLocked(const int idx, const char* value);
 void setXPHeadingBug(const int idx, const char* value);
 void setXPOBS(const int idx, const char* value);
-void toggleXPNavFreqs(const int sfreq, const int afreq);
-void getXPNav1ActiveFreq(const int idx, const char* value);
-void getXPNav1StandbyFreq(const int idx, const char* value);
+void getXPCom1Freq(const int idx, const char* value);
+void getXPNav1Freq(const int idx, const char* value);
+void setHSISrc(const int idx, const char* value);
 
 #endif
 
