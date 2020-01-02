@@ -1,4 +1,4 @@
-﻿# XPDuino
+﻿# YAAXI
 
 A simple Arduino/X-Plane interface system for adding physical cockpit controls to
 X-Plane.
