@@ -7,6 +7,10 @@ X-Plane.
 Arduino programming in C and interfacing of devices to Arduino.  It doesn't
 mean gui configuration screens and/or drag and drop customisation etc).
 
+## Current Status
+
+Very RAW.  IP address hardcoded.
+
 ### Philosophy
 
 The Arduino is where things are configured, not X-Plane.  The configuration is
